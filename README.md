@@ -73,6 +73,9 @@ shell**, and the **allowlist guardrails**.
 
 ## Install
 
+Requires [Claude Code](https://claude.com/claude-code) (Anthropic's official CLI
+for Claude). Inside a Claude Code session:
+
 ```
 /plugin marketplace add NamrataAShettar/claude-sethu
 /plugin install sethu
@@ -281,6 +284,20 @@ sethu (the bridge) is published at
 [claude-sethu](https://github.com/NamrataAShettar/claude-sethu).
 [claude-yodha](https://github.com/NamrataAShettar/claude-yodha) is the warrior —
 a status-line game for Claude Code. Different tools, same author.
+
+## About Claude Code
+
+sethu is a plugin for **[Claude Code](https://claude.com/claude-code)**,
+Anthropic's official CLI for Claude. It's built entirely from Claude Code's
+extension points — a `UserPromptSubmit` hook intercepts `>`/`>>`, and a
+`SessionStart` hook shows the first-run hint.
+
+- 🏠 [Claude Code](https://claude.com/claude-code) — what it is / install
+- 📚 [Documentation](https://code.claude.com/docs) — full docs
+- 🔌 [Plugins guide](https://code.claude.com/docs/en/plugins) ·
+  [reference](https://code.claude.com/docs/en/plugins-reference) ·
+  [marketplaces](https://code.claude.com/docs/en/plugin-marketplaces)
+- 🪝 [Hooks](https://code.claude.com/docs/en/hooks) — the mechanism sethu is built on
 
 ## License
 
