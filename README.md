@@ -215,6 +215,7 @@ sethu                     # show options / help
 sethu --allow "<cmd>"     sethu --unallow "<cmd>"
 sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a pane/window now
 sethu --readonly on       sethu --mode shell        sethu --prefix ">"
+sethu --color off         # plain result header (colorblind-safe by default; NO_COLOR also disables)
 sethu --restart           # restart the persistent shell(s) — clears shell-mode state
 sethu --runner            # show the current config (~/.claude/sethu.json)
 ```

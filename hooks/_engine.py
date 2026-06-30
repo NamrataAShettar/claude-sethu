@@ -31,8 +31,29 @@ import tempfile
 import time
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
-            "readonly": False, "trust": False, "rc": False}
+            "readonly": False, "trust": False, "rc": False, "color": True}
 MODES = ("stateless", "cwd", "shell")
+
+# ANSI colors for the result header. Colorblind-safe (blue/orange, not green/red)
+# per Okabe-Ito. Off via `sethu --color off` or the NO_COLOR env var. Only the
+# header is colored — the command's own output is left untouched.
+_ANSI = {
+    "ok": "38;5;75",     # sky blue   — success (exit 0)
+    "fail": "38;5;208",  # orange     — nonzero exit
+    "warn": "38;5;214",  # amber      — no exit code
+    "tag": "38;5;37",    # teal       — the [mode] tag
+    "trust": "38;5;208", # orange     — the ⚠trust warning
+    "cmd": "1",          # bold       — the command that ran
+    "dim": "2",          # dim        — separators ( · $ )
+}
+
+
+def _color_on(cfg):
+    return bool(cfg.get("color", True)) and not os.environ.get("NO_COLOR")
+
+
+def _c(text, key, on):
+    return f"\033[{_ANSI[key]}m{text}\033[0m" if on else text
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -413,11 +434,14 @@ def process(prompt, data):
     """Return one of: {'passthrough':True} | {'block':text} | {'context':text}."""
     cfg = load_config()
     prefix = cfg["prefix"]
-    if not prefix or not prompt.startswith(prefix):
+    # Tolerate leading whitespace so " > date" works like "> date" — a stray
+    # space before the prefix used to fall through to the model unintercepted.
+    stripped = prompt.lstrip()
+    if not prefix or not stripped.startswith(prefix):
         return {"passthrough": True}
 
-    pipe = prompt.startswith(prefix * 2)
-    cmd = prompt[len(prefix) * (2 if pipe else 1):].strip()
+    pipe = stripped.startswith(prefix * 2)
+    cmd = stripped[len(prefix) * (2 if pipe else 1):].strip()
     if not cmd:
         return {"block": HELP}
 
@@ -473,10 +497,17 @@ def process(prompt, data):
         out, code = run_capture(cmd, cwd=base)
 
     # Completion header: which mode (+ trust warning) + done/failed + exit code.
-    mark = "✓" if code == 0 else ("✗" if code is not None else "⚠")
+    # Each part is colored distinctly (colorblind-safe) so the status, command,
+    # and output read apart at a glance.
+    on = _color_on(cfg)
+    state = "ok" if code == 0 else ("fail" if code is not None else "warn")
+    mark = {"ok": "✓", "fail": "✗", "warn": "⚠"}[state]
     status = f"exit {code}" if code is not None else "no exit code"
-    tag = mode + (" ⚠trust" if trust_on else "")
-    header = f"[{tag}] {mark} {status} · $ {cmd}"
+    tag = _c(f"[{mode}]", "tag", on)
+    if trust_on:
+        tag += " " + _c("⚠trust", "trust", on)
+    mark_status = _c(f"{mark} {status}", state, on)
+    header = f"{tag} {mark_status} {_c('·', 'dim', on)} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
     body = f"{header}\n{out}"
 
     if pipe:
@@ -510,6 +541,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --trust on           bypass the allowlist — run ANY command (footgun)
   sethu --mode {'|'.join(MODES)}
   sethu --rc on              shell mode: source your shell rc (aliases/functions/env)
+  sethu --color off          turn off the colored result header (or NO_COLOR=1)
   sethu --restart            restart the persistent shell(s) (clear shell state)
   sethu --prefix ">"         change the trigger
   sethu --help               full flag reference
@@ -520,7 +552,7 @@ Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
-               "trust", "rc", "prefix", "restart", "runner", "show", "help"}
+               "trust", "rc", "color", "prefix", "restart", "runner", "show", "help"}
 
 
 def normalize_argv(argv):
@@ -559,6 +591,8 @@ def main(argv=None):
                    help="bypass the allowlist — run ANY command (footgun)")
     p.add_argument("--rc", choices=["on", "off"],
                    help="in shell mode, source your shell rc (aliases/functions/env)")
+    p.add_argument("--color", choices=["on", "off"],
+                   help="color the result header (default on; NO_COLOR also disables)")
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
@@ -616,6 +650,10 @@ def main(argv=None):
         cfg["prefix"] = a.prefix
         print(f"✔ prefix: {a.prefix!r}")
         changed = True
+    if a.color:
+        cfg["color"] = (a.color == "on")
+        print(f"✔ color: {a.color}")
+        changed = True
     if a.readonly:
         cfg["readonly"] = (a.readonly == "on")
         note = ""
@@ -650,6 +688,7 @@ def main(argv=None):
         trust_disp = "set but OVERRIDDEN by readonly ⚠" if both else "ON ⚠ allowlist bypassed"
     print(f"  trust:    {trust_disp}")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (shell mode sources your shell rc)")
+    print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (colored result header)")
     if both:
         print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
               "Run `sethu --readonly on` or `sethu --trust off` to clean up.")

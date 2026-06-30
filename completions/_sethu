@@ -15,6 +15,7 @@ _sethu() {
     'readonly:auto-allow read-only commands'
     'trust:bypass the allowlist — run ANY command (footgun)'
     'rc:shell mode — source your shell rc (aliases/functions/env)'
+    'color:color the result header (on/off)'
     'prefix:set the trigger prefix'
     'restart:restart the persistent shell(s)'
     'runner:show the current config'
@@ -24,14 +25,14 @@ _sethu() {
     if [[ $words[2] == -* ]]; then
       _values 'flag' \
         '--mode' '--allow' '--unallow' '--launch' '--unlaunch' \
-        '--readonly' '--trust' '--rc' '--prefix' '--restart' '--runner' '--help'
+        '--readonly' '--trust' '--rc' '--color' '--prefix' '--restart' '--runner' '--help'
     else
       _describe 'subcommand' subs
     fi
   elif (( CURRENT == 3 )); then
     case $words[2] in
       mode|--mode)         _values 'mode' stateless cwd shell ;;
-      readonly|--readonly|trust|--trust|rc|--rc) _values 'state' on off ;;
+      readonly|--readonly|trust|--trust|rc|--rc|color|--color) _values 'state' on off ;;
     esac
   fi
 }

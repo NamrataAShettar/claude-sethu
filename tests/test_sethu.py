@@ -172,6 +172,42 @@ class TestRunner(Base):
         self.assertEqual(self.proc("just a normal prompt"), {"passthrough": True})
 
 
+class TestColor(Base):
+    def test_header_colored_by_default(self):
+        os.environ.pop("NO_COLOR", None)
+        self.write(readonly=True)
+        self.assertIn("\033[", self.proc("> ls")["block"])  # ANSI present
+
+    def test_color_off_strips_ansi(self):
+        self.write(readonly=True, color=False)
+        self.assertNotIn("\033[", self.proc("> ls")["block"])
+
+    def test_no_color_env_disables(self):
+        self.write(readonly=True)
+        os.environ["NO_COLOR"] = "1"
+        try:
+            self.assertNotIn("\033[", self.proc("> ls")["block"])
+        finally:
+            os.environ.pop("NO_COLOR", None)
+
+    def test_piped_context_has_no_ansi(self):
+        # Output sent to Claude must stay plain (color is for your eyes only).
+        os.environ.pop("NO_COLOR", None)
+        self.write(allow=["echo"])
+        self.assertNotIn("\033[", self.proc(">> echo hi")["context"])
+
+
+class TestLeadingWhitespace(Base):
+    def test_space_before_prefix_still_intercepts(self):
+        self.write(readonly=True)
+        r = self.proc("   > pwd")            # stray leading spaces
+        self.assertNotIn("passthrough", r)   # handled, not leaked to the model
+        self.assertIn("pwd", r["block"])
+
+    def test_plain_prompt_still_passes_through(self):
+        self.assertEqual(self.proc("just talking to claude"), {"passthrough": True})
+
+
 class TestCwdMode(Base):
     def test_cd_persists(self):
         self.write(readonly=True)
@@ -313,6 +349,7 @@ class TestConfig(Base):
         self.assertEqual(cfg["allow"], [])
         self.assertFalse(cfg["readonly"])
         self.assertFalse(cfg["rc"])
+        self.assertTrue(cfg["color"])
 
     def test_rc_roundtrips(self):
         _engine.main(["--rc", "on"])
