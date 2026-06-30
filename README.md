@@ -159,10 +159,15 @@ remains the safer middle ground (inspection commands free, writes refused).
 - A command runs only if it matches an allow entry exactly or as `"<entry> …"`,
   so `> rm -rf …` is refused unless explicitly allowed.
 - ⚠️ The runner executes in your shell and **bypasses Claude Code's permission
-  prompts**, so keep the allowlist tight — treat it like shell aliases. (Note:
-  an explicit `--allow "git log"` lets you append `> git log …` including pipes,
-  so don't allowlist a command you wouldn't trust with arbitrary trailing args;
-  read-only mode is the injection-hardened option.)
+  prompts**, so keep the allowlist tight — treat it like shell aliases.
+- **Injection-hardened.** An allowlisted command may be followed by plain
+  arguments only — *not* a pipe, redirect, `;`/`&&`, command substitution,
+  backtick, or newline. So allowlisting `ls` does **not** permit
+  `> ls | grep x | rm -rf x` or `> ls; rm -rf ~`; they're refused. (For piping
+  between read-only commands, use `--readonly on`, which validates every stage.)
+- Read-only mode allows only genuinely read-only programs and git subcommands
+  (no `git config`/`stash`/`branch -d`, no `find -delete`, no redirection).
+- The persistent-shell socket is created `0600` (owner-only).
 - `cd` is exempt from the allowlist (it runs nothing — just moves the working
   directory).
 

@@ -63,9 +63,21 @@ def save_config(cfg):
 
 
 # ── allow / launch matching ───────────────────────────────────────────────────
+# Shell metacharacters that chain to *another* command (pipe, redirect, &&/;,
+# substitution, backtick). An allowlisted command may be followed by plain
+# arguments only — NOT a pipe/redirect to something unallowed. Without this,
+# allowing `ls` would also allow `ls | rm -rf x` via prefix matching.
+_ALLOW_META = re.compile(r"[;&|<>`\n\r]|\$\(")
+
+
 def _matches(cmd, entries):
     cmd = cmd.strip()
-    return any(cmd == e or cmd.startswith(e + " ") for e in entries)
+    for e in entries:
+        if cmd == e:
+            return True
+        if cmd.startswith(e + " ") and not _ALLOW_META.search(cmd):
+            return True
+    return False
 
 
 def is_cd(cmd):
@@ -133,12 +145,16 @@ READONLY = {
     "cmp", "shasum", "md5", "sha256sum", "cksum", "hexdump", "xxd", "strings",
     "cal", "look", "fold", "fmt", "rev", "find", "fd", "git",
 }
+# Only unambiguously read-only git subcommands. Excluded: branch/tag/remote
+# (delete/create with flags), stash (mutates), config (writes with `key value`).
+# Allowlist those explicitly if you need them.
 READONLY_GIT = {
-    "status", "log", "diff", "show", "branch", "remote", "tag", "describe",
-    "blame", "ls-files", "rev-parse", "shortlog", "stash", "config",
+    "status", "log", "diff", "show", "describe", "blame", "ls-files",
+    "rev-parse", "shortlog", "rev-list", "cat-file", "reflog",
 }
-# Shell metacharacters that enable writes / chaining / substitution / background.
-_DANGER = re.compile(r"[;&`<>]|\$\(")
+# Shell metacharacters that enable writes / chaining / substitution / background
+# (newlines included — a multi-line prompt is multiple commands).
+_DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
 def is_readonly_safe(cmd):

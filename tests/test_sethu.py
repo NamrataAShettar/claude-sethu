@@ -81,6 +81,30 @@ class TestSafety(Base):
         self.write(allow=["vi"])
         self.assertIn("interactive", self.proc("> vi")["block"])
 
+    def test_allowlist_no_pipe_injection(self):
+        # Allowing `ls` must NOT permit `ls | rm -rf x` (the reported bug).
+        self.write(allow=["ls"])
+        self.assertIn("isn't allowed", self.proc("> ls | grep x | rm -rf x")["block"])
+        self.assertIn("isn't allowed", self.proc("> ls; rm -rf x")["block"])
+        self.assertIn("isn't allowed", self.proc("> ls && rm -rf x")["block"])
+        self.assertIn("isn't allowed", self.proc("> ls $(rm)")["block"])
+        # but plain args are still fine
+        self.assertNotIn("isn't allowed", self.proc("> ls -la")["block"])
+
+    def test_allowlist_no_newline_injection(self):
+        self.write(allow=["ls"])
+        self.assertIn("isn't allowed", self.proc("> ls\nrm -rf x")["block"])
+
+    def test_readonly_no_newline_injection(self):
+        self.write(readonly=True)
+        self.assertIn("isn't allowed", self.proc("> ls\nrm -rf x")["block"])
+
+    def test_readonly_git_writes_refused(self):
+        self.write(readonly=True)
+        for c in ["git config user.name hacked", "git stash", "git branch -D main",
+                  "git tag -d v1", "git remote add evil url"]:
+            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+
 
 class TestTrust(Base):
     def test_trust_bypasses_allowlist(self):

@@ -92,7 +92,15 @@ def main():
     except OSError:
         pass
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(sock_path)
+    old_umask = os.umask(0o077)  # socket file created 0600 — owner-only
+    try:
+        srv.bind(sock_path)
+    finally:
+        os.umask(old_umask)
+    try:
+        os.chmod(sock_path, 0o600)
+    except OSError:
+        pass
     srv.listen(8)
     srv.settimeout(IDLE_TIMEOUT)
 
