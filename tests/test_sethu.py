@@ -269,6 +269,21 @@ class TestNormalizeArgv(unittest.TestCase):
         self.assertEqual(n([]), [])
 
 
+class TestFirstRunHint(Base):
+    def test_fires_once_then_silent(self):
+        first = _engine.first_run_hint()
+        self.assertIsNotNone(first)
+        self.assertIn("systemMessage", first)
+        self.assertIn("sethu", first["systemMessage"])
+        # Marker now exists → never nudges again.
+        self.assertTrue(os.path.exists(_engine._welcome_marker()))
+        self.assertIsNone(_engine.first_run_hint())
+
+    def test_marker_is_beside_config(self):
+        self.assertEqual(os.path.dirname(_engine._welcome_marker()),
+                         os.path.dirname(_engine.config_path()))
+
+
 class TestConfig(Base):
     def test_defaults_when_missing(self):
         os.unlink(self.cfg)

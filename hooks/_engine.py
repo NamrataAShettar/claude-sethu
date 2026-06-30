@@ -40,6 +40,35 @@ def config_path():
     return os.environ.get("SETHU_CONFIG") or os.path.expanduser("~/.claude/sethu.json")
 
 
+def _welcome_marker():
+    return os.path.join(os.path.dirname(config_path()), ".sethu-welcomed")
+
+
+FIRST_RUN_HINT = (
+    "🌉 sethu is installed — run terminal commands free from this box. "
+    "`> git status` shows output to you only (zero tokens); `>> git status` "
+    "sends it to Claude. Nothing runs until you allow it — try "
+    "`sethu --readonly on`, then type `sethu` for a \"when to use what\" guide."
+)
+
+
+def first_run_hint():
+    """Return {'systemMessage': ...} the first time sethu ever runs, else None.
+
+    Shown once per machine (a marker file next to the config), so new users
+    discover `>`/`>>` without knowing to type `sethu`. systemMessage is shown to
+    the user, not added to the model context, so it costs zero API tokens."""
+    marker = _welcome_marker()
+    if os.path.exists(marker):
+        return None
+    try:
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        open(marker, "w").close()
+    except Exception:
+        pass
+    return {"systemMessage": FIRST_RUN_HINT}
+
+
 def load_config():
     cfg = {k: (list(v) if isinstance(v, list) else v) for k, v in DEFAULTS.items()}
     try:
