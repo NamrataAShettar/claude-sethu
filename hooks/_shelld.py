@@ -81,7 +81,10 @@ def main():
         termios.tcsetattr(master, termios.TCSANOW, attrs)
     except Exception:
         pass
-    os.write(master, b"export PS1='' PS2='' ; stty -echo 2>/dev/null\n")
+    # GIT_PAGER/PAGER=cat so git (log/branch/diff) and other paged commands don't
+    # launch `less` under the PTY and hang. NO_COLOR keeps output clean.
+    os.write(master, b"export PS1='' PS2='' GIT_PAGER=cat PAGER=cat NO_COLOR=1 ; "
+                     b"stty -echo 2>/dev/null\n")
     _drain(master, 0.4)
 
     try:

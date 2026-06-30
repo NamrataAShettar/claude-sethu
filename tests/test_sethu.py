@@ -157,6 +157,14 @@ class TestShellMode(Base):
         self._shutdown(sid)
         self.assertNotIn("gone", self.proc("> echo $BAR", sid=sid)["block"])
 
+    def test_shell_disables_pager(self):
+        # Regression: paged commands (git log/branch) must not hang under the PTY.
+        sid = "test-shell-pager"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", allow=["echo"])
+        r = self.proc("> echo PG=$GIT_PAGER", sid=sid)
+        self.assertIn("PG=cat", r["block"])
+
     def test_real_uuid_session_id(self):
         # Regression: a full-length UUID must not overflow the AF_UNIX path.
         sid = "a253f39f-aecf-416f-b1f0-2702df515154"
