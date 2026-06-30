@@ -14,6 +14,7 @@ import unittest
 HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
 sys.path.insert(0, HOOKS)
 import _engine  # noqa: E402
+import _shelld  # noqa: E402
 
 
 class Base(unittest.TestCase):
@@ -232,6 +233,17 @@ class TestShellMode(Base):
         r = self.proc("> echo runs_ok", sid=sid)
         self.assertIn("runs_ok", r["block"])
         self.assertNotIn("path too long", r["block"])
+
+
+class TestSocketPerms(unittest.TestCase):
+    def test_owner_only_is_ok(self):
+        # 0600 socket (the umask result) is accepted.
+        self.assertTrue(_shelld._perms_ok(0o140600))
+
+    def test_group_or_world_access_refused(self):
+        # Any group/world bit means the daemon must fail closed.
+        for m in [0o140660, 0o140666, 0o140640, 0o140604, 0o140700 | 0o010]:
+            self.assertFalse(_shelld._perms_ok(m), oct(m))
 
 
 class TestSocketPath(unittest.TestCase):

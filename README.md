@@ -167,7 +167,9 @@ remains the safer middle ground (inspection commands free, writes refused).
   between read-only commands, use `--readonly on`, which validates every stage.)
 - Read-only mode allows only genuinely read-only programs and git subcommands
   (no `git config`/`stash`/`branch -d`, no `find -delete`, no redirection).
-- The persistent-shell socket is created `0600` (owner-only).
+- The persistent-shell socket is created `0600` (owner-only), and the daemon
+  **refuses to serve** if it ever ends up group/world-accessible — it fails
+  closed rather than exposing a live shell to other local users.
 - `cd` is exempt from the allowlist (it runs nothing — just moves the working
   directory).
 

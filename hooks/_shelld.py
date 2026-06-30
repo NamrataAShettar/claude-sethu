@@ -25,6 +25,11 @@ IDLE_TIMEOUT = 1800  # 30 minutes
 CMD_TIMEOUT = 60      # max seconds to wait for a command's output
 
 
+def _perms_ok(mode):
+    """True only if the socket's file mode grants no group/world access."""
+    return not (mode & 0o077)
+
+
 def _drain(master, seconds):
     end = time.time() + seconds
     while time.time() < end:
@@ -119,6 +124,25 @@ def main():
         os.chmod(sock_path, 0o600)
     except OSError:
         pass
+    # Defence in depth: AF_UNIX sockets are gated by filesystem permissions, so
+    # refuse to serve if the socket ended up group/world-accessible (e.g. a tmp
+    # filesystem that honours neither umask nor chmod). Better to fail closed —
+    # the client surfaces "could not start the shell daemon" — than to expose a
+    # live shell to other local users.
+    try:
+        mode = os.stat(sock_path).st_mode
+    except OSError:
+        mode = 0o077  # can't verify → treat as unsafe
+    if not _perms_ok(mode):
+        try:
+            os.unlink(sock_path)
+        except OSError:
+            pass
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+        os._exit(1)
     srv.listen(8)
     srv.settimeout(IDLE_TIMEOUT)
 
