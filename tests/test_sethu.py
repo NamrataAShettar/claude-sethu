@@ -157,6 +157,20 @@ class TestShellMode(Base):
         self._shutdown(sid)
         self.assertNotIn("gone", self.proc("> echo $BAR", sid=sid)["block"])
 
+    def test_stale_socket_recovers(self):
+        # Regression: a leftover socket file with no live daemon ("connection
+        # refused") must be cleaned up and a fresh daemon spawned.
+        sid = "test-shell-stale"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", allow=["echo"])
+        sock = _engine._sock_path(sid)
+        dead = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        dead.bind(sock)   # creates the socket file…
+        dead.close()      # …but nothing is listening on it
+        self.assertTrue(os.path.exists(sock))
+        r = self.proc("> echo recovered", sid=sid)
+        self.assertIn("recovered", r["block"])
+
     def test_shell_disables_pager(self):
         # Regression: paged commands (git log/branch) must not hang under the PTY.
         sid = "test-shell-pager"

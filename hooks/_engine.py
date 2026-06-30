@@ -245,24 +245,44 @@ def kill_daemons():
     return n
 
 
+def _connect(sock):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(65)
+    s.connect(sock)
+    return s
+
+
+def _spawn_daemon(sock, cwd_hint):
+    shelld = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shelld.py")
+    subprocess.Popen(
+        [sys.executable, shelld, sock, cwd_hint or os.path.expanduser("~")],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL, start_new_session=True,
+    )
+
+
 def shell_run(sid, cmd, cwd_hint=None):
     sock = _sock_path(sid)
-    if not os.path.exists(sock):
-        shelld = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shelld.py")
-        subprocess.Popen(
-            [sys.executable, shelld, sock, cwd_hint or os.path.expanduser("~")],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL, start_new_session=True,
-        )
-        for _ in range(60):
-            if os.path.exists(sock):
-                break
-            time.sleep(0.05)
     s = None
     try:
-        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        s.settimeout(65)
-        s.connect(sock)
+        try:
+            s = _connect(sock)  # an existing, live daemon
+        except OSError:
+            # socket missing, or stale (daemon gone → "connection refused").
+            # Remove it and spawn a fresh daemon, then connect once it's up.
+            try:
+                os.unlink(sock)
+            except OSError:
+                pass
+            _spawn_daemon(sock, cwd_hint)
+            for _ in range(80):
+                try:
+                    s = _connect(sock)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+            if s is None:
+                return ("sethu shell error: could not start the shell daemon", None)
         s.sendall((cmd + "\n").encode("utf-8"))
         data = b""
         while True:
