@@ -205,9 +205,14 @@ def launch_in_terminal(cmd):
 
 
 # ── persistent shell (shell mode) ─────────────────────────────────────────────
+# Bump when the daemon wire protocol changes, so a new client never talks to an
+# old daemon left running from a previous version (it just idles out).
+_PROTO = 2
+
+
 def _sock_path(sid):
     safe = "".join(c for c in (sid or "default") if c.isalnum() or c in "-_")
-    return os.path.join(tempfile.gettempdir(), f"sethu-shell-{safe}.sock")
+    return os.path.join(tempfile.gettempdir(), f"sethu-shell-{safe}-p{_PROTO}.sock")
 
 
 def shell_run(sid, cmd, cwd_hint=None):
@@ -238,8 +243,11 @@ def shell_run(sid, cmd, cwd_hint=None):
         # daemon replies "<exit_code>\n<output>"
         text = data.decode("utf-8", "replace")
         first, _, rest = text.partition("\n")
-        code = int(first) if first.strip().lstrip("-").isdigit() else None
-        return (rest.strip() or "(no output)", code)
+        if first.strip().lstrip("-").isdigit():
+            return (rest.strip() or "(no output)", int(first))
+        # No exit-code line (e.g. an older daemon) — show the whole reply rather
+        # than swallowing it.
+        return (text.strip() or "(no output)", None)
     except Exception as e:
         return (f"sethu shell error: {e}", None)
 
