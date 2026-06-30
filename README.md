@@ -217,6 +217,7 @@ sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a pane/wind
 sethu --readonly on       sethu --mode shell        sethu --prefix ">"
 sethu --color off         # plain result header (colorblind-safe by default; NO_COLOR also disables)
 sethu --maxlines 40       # cap long output (e.g. ps aux); full output saved to a file (0 = unlimited)
+                          # (saved-output + launch temp files are auto-deleted after 7 days)
 sethu --restart           # restart the persistent shell(s) — clears shell-mode state
 sethu --runner            # show the current config (~/.claude/sethu.json)
 ```

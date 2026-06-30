@@ -245,6 +245,28 @@ class TestTruncate(Base):
         self.assertNotIn("\n100", r["context"])
 
 
+class TestSweep(unittest.TestCase):
+    def test_old_files_removed_fresh_kept(self):
+        import tempfile as _tf
+        tmp = _tf.gettempdir()
+        old = os.path.join(tmp, "sethu-out-deadbeef0001.log")
+        cmd = os.path.join(tmp, "sethu-launch-deadbeef0002.command")
+        fresh = os.path.join(tmp, "sethu-out-deadbeef0003.log")
+        for p in (old, cmd, fresh):
+            open(p, "w").close()
+        self.addCleanup(lambda: [os.path.exists(p) and os.unlink(p)
+                                 for p in (old, cmd, fresh)])
+        now = os.path.getmtime(fresh) + 100
+        # Backdate two files well past the max age.
+        stale = now - _engine._TEMP_MAX_AGE - 1000
+        os.utime(old, (stale, stale))
+        os.utime(cmd, (stale, stale))
+        _engine._sweep_temp(now)
+        self.assertFalse(os.path.exists(old), "stale .log should be swept")
+        self.assertFalse(os.path.exists(cmd), "stale .command should be swept")
+        self.assertTrue(os.path.exists(fresh), "fresh file must be kept")
+
+
 class TestLeadingWhitespace(Base):
     def test_space_before_prefix_still_intercepts(self):
         self.write(readonly=True)

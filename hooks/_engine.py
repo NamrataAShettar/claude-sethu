@@ -59,9 +59,29 @@ def _c(text, key, on):
 
 def _output_path(sid):
     """Stable per-session file holding the LAST command's full output. Reused
-    (overwritten) each command, so it never accumulates litter."""
+    (overwritten) each command, so a session never accumulates more than one."""
     h = hashlib.md5((sid or "default").encode()).hexdigest()[:12]
     return os.path.join(tempfile.gettempdir(), f"sethu-out-{h}.log")
+
+
+# How long sethu's own temp files (saved output + launch scripts) live before the
+# opportunistic sweep removes them. Stops storage bloat across many sessions
+# without depending on the OS to purge the temp dir.
+_TEMP_MAX_AGE = 7 * 24 * 3600  # 7 days
+
+
+def _sweep_temp(now):
+    """Best-effort: delete sethu's leftover temp files older than _TEMP_MAX_AGE.
+    `now` is passed in (time.time()) so it's testable and side-effect-free here.
+    Sockets are left alone — the daemon manages their lifecycle."""
+    tmp = tempfile.gettempdir()
+    for pat in ("sethu-out-*.log", "sethu-launch-*.command"):
+        for p in glob.glob(os.path.join(tmp, pat)):
+            try:
+                if now - os.path.getmtime(p) > _TEMP_MAX_AGE:
+                    os.unlink(p)
+            except OSError:
+                pass
 
 
 def _truncate(out, sid, max_lines, on):
@@ -342,7 +362,7 @@ def launch_in_terminal(cmd):
         # Last resort if Automation permission is denied: a .command file that
         # drops into a login shell after the command, so it isn't a one-shot.
         try:
-            fd, path = tempfile.mkstemp(suffix=".command")
+            fd, path = tempfile.mkstemp(prefix="sethu-launch-", suffix=".command")
             with os.fdopen(fd, "w") as f:
                 f.write(f"#!/bin/bash\n{cmd}\nexec {shell} -l\n")
             os.chmod(path, 0o755)
@@ -472,6 +492,13 @@ def process(prompt, data):
     stripped = prompt.lstrip()
     if not prefix or not stripped.startswith(prefix):
         return {"passthrough": True}
+
+    # Opportunistically clear sethu's own stale temp files (saved output, launch
+    # scripts) so storage doesn't bloat. Cheap, best-effort, only on our prompts.
+    try:
+        _sweep_temp(time.time())
+    except Exception:
+        pass
 
     pipe = stripped.startswith(prefix * 2)
     cmd = stripped[len(prefix) * (2 if pipe else 1):].strip()
