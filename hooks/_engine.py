@@ -417,6 +417,14 @@ In the prompt (no `!` needed — costs zero tokens):
   > <cmd>        run an allowlisted command; output shown to you, model blocked
   >> <cmd>       run it AND send the output to Claude (this costs tokens)
 
+When to use what:
+  > cmd                 just inspect something yourself — free, stays out of context
+  >> cmd                you want Claude to act on the output (costs tokens)
+  --launch  <cmd>       the command is interactive (vim, top, ssh) — pop a real terminal
+  --readonly on         tired of allowing ls / cat / git log one by one
+  --mode shell          you need cd / export / venv to persist across commands
+  --trust on            you want > to run anything, no allowlist (footgun)
+
 Manage it (type `sethu …` in the prompt or a terminal):
   sethu                      show this help
   sethu --runner             show current config

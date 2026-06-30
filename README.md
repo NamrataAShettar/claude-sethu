@@ -97,7 +97,8 @@ echo "source $PWD/completions/sethu.bash" >> ~/.bashrc
 
 (Tab-completion works in a real terminal only — Claude Code's prompt box can't
 autocomplete hook-intercepted commands. In the box, type bare `sethu` for the
-options menu.)
+options menu, which leads with a **"when to use what"** guide — `>` vs `>>` vs
+`--launch` vs `--readonly` vs `--mode shell` vs `--trust`.)
 
 ## `quiet` — shrink command output Claude pays for
 

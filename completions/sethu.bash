@@ -4,11 +4,11 @@ _sethu() {
   local cur prev flags subs
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  flags="--mode --allow --unallow --launch --unlaunch --readonly --prefix --restart --runner --help"
-  subs="mode allow unallow launch unlaunch readonly prefix restart runner help"
+  flags="--mode --allow --unallow --launch --unlaunch --readonly --trust --rc --prefix --restart --runner --help"
+  subs="mode allow unallow launch unlaunch readonly trust rc prefix restart runner help"
   case "$prev" in
     --mode|mode)       COMPREPLY=( $(compgen -W "stateless cwd shell" -- "$cur") ); return ;;
-    --readonly|readonly) COMPREPLY=( $(compgen -W "on off" -- "$cur") ); return ;;
+    --readonly|readonly|--trust|trust|--rc|rc) COMPREPLY=( $(compgen -W "on off" -- "$cur") ); return ;;
   esac
   if [[ "$cur" == -* ]]; then
     COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
