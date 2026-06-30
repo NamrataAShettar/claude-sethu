@@ -21,16 +21,36 @@ output.
 ## Install
 
 ```
-/plugin marketplace add NamrataAShettar/sethu
+/plugin marketplace add NamrataAShettar/claude-sethu
 /plugin install sethu
 /reload-plugins
 ```
 
-Optional launcher so you can type `sethu …` in a terminal too:
+Optional launchers so you can type `sethu …` and `quiet …` in a terminal too:
 
 ```bash
 ln -s "$PWD/bin/sethu" /opt/homebrew/bin/sethu   # any dir on your PATH
+ln -s "$PWD/bin/quiet" /opt/homebrew/bin/quiet
 ```
+
+## `quiet` — shrink command output Claude pays for
+
+When **Claude** runs a command, its full output enters Claude's context and costs
+tokens. `quiet` runs the command, strips ANSI/progress noise, and surfaces only a
+short tail (plus error lines on failure) with the real exit code — so a 200-line
+build becomes ~20 lines in context.
+
+```bash
+quiet npm install            # only the tail + exit code reach Claude
+quiet --lines 40 pytest      # keep the last 40 lines
+```
+
+It exits with the command's own status, so pass/fail is preserved. To make Claude
+use it automatically, drop the ready-made snippet from
+[`docs/token-thrifty.md`](docs/token-thrifty.md) into your project's `CLAUDE.md`.
+
+> `> cmd` keeps *your* commands out of Claude's context entirely; `quiet` shrinks
+> *Claude's own* commands. Different levers, same goal: fewer tokens.
 
 ## Safety
 
@@ -73,8 +93,10 @@ Config lives in `~/.claude/sethu.json`:
 
 ## Companion
 
-sethu is the bridge; [claude-yodha](https://github.com/NamrataAShettar/claude-yodha)
-is the warrior — a status-line game for Claude Code. Different tools, same author.
+sethu (the bridge) is published at
+[claude-sethu](https://github.com/NamrataAShettar/claude-sethu).
+[claude-yodha](https://github.com/NamrataAShettar/claude-yodha) is the warrior —
+a status-line game for Claude Code. Different tools, same author.
 
 ## License
 

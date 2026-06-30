@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""quiet — run a command but surface only the signal, to save Claude's tokens.
+
+Claude reads a command's full output into its context (= tokens). `quiet` runs
+the command, strips ANSI/progress noise, and prints just a short tail plus the
+real exit code — instead of dumping hundreds of lines. It exits with the
+command's own status, so pass/fail is preserved.
+
+Usage:
+  quiet <command ...>            # e.g. quiet npm test
+  quiet --lines 40 make build    # keep the last 40 lines (default 20)
+
+Have Claude call `quiet` for verbose installs/builds/tests. On failure it shows
+the tail (where errors usually are) and also any error-looking lines from above.
+"""
+import re
+import subprocess
+import sys
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+ERRORish = re.compile(r"\b(error|fail(ed|ure)?|exception|traceback|fatal)\b", re.I)
+
+
+def main():
+    args = sys.argv[1:]
+    lines = 20
+    if len(args) >= 2 and args[0] == "--lines":
+        try:
+            lines = max(1, int(args[1]))
+            args = args[2:]
+        except ValueError:
+            pass
+    if not args:
+        print("usage: quiet [--lines N] <command ...>")
+        return 2
+
+    cmd = " ".join(args)
+    p = subprocess.run(["bash", "-c", cmd], capture_output=True, text=True)
+
+    out = ANSI.sub("", (p.stdout or "") + (p.stderr or ""))
+    # collapse \r progress redraws to their final state, drop trailing blanks
+    rows = [seg.split("\r")[-1] for seg in out.split("\n")]
+    while rows and rows[-1].strip() == "":
+        rows.pop()
+
+    total = len(rows)
+    tail = rows[-lines:]
+    hidden = rows[:total - len(tail)]
+
+    mark = "✓" if p.returncode == 0 else "✗"
+    header = f"{mark} `{cmd}` → exit {p.returncode} · {total} line(s)"
+    if hidden:
+        header += f" · showing last {len(tail)} ({len(hidden)} hidden)"
+    print(header)
+
+    # On failure, surface error-looking lines that are above the tail window.
+    if p.returncode != 0 and hidden:
+        flagged = [l for l in hidden if ERRORish.search(l)][-5:]
+        if flagged:
+            print("… error lines from above:")
+            for l in flagged:
+                print(l)
+            print("…")
+
+    if tail:
+        print("\n".join(tail))
+    return p.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())
