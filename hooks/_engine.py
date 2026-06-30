@@ -49,6 +49,10 @@ _ANSI = {
 }
 
 
+# sethu's keyboard-key bridge icon: towers (|), cables dipping to the deck (^=^).
+ICON = "|^=^|"
+
+
 def _color_on(cfg):
     return bool(cfg.get("color", True)) and not os.environ.get("NO_COLOR")
 
@@ -567,7 +571,8 @@ def process(prompt, data):
     if trust_on:
         tag += " " + _c("⚠trust", "trust", on)
     mark_status = _c(f"{mark} {status}", state, on)
-    header = f"{tag} {mark_status} {_c('·', 'dim', on)} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
+    icon = _c(ICON, "tag", on)
+    header = f"{icon} {tag} {mark_status} {_c('·', 'dim', on)} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
 
     # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
     # The full text is written to a per-session file; the note points at it.
@@ -587,7 +592,7 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""sethu सेतु — run terminal commands from Claude's prompt box.
+    return f"""{ICON} sethu सेतु — run terminal commands from Claude's prompt box.
 
 In the prompt (no `!` needed — costs zero tokens):
   > <cmd>        run an allowlisted command; output shown to you, model blocked

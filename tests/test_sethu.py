@@ -172,6 +172,14 @@ class TestRunner(Base):
         self.assertEqual(self.proc("just a normal prompt"), {"passthrough": True})
 
 
+class TestIcon(Base):
+    def test_icon_on_header_not_in_pipe(self):
+        self.write(allow=["echo"], color=False)
+        self.assertIn(_engine.ICON, self.proc("> echo hi")["block"])
+        # The pipe-to-Claude context stays clean (icon is for your eyes only).
+        self.assertNotIn(_engine.ICON, self.proc(">> echo hi")["context"])
+
+
 class TestColor(Base):
     def test_header_colored_by_default(self):
         os.environ.pop("NO_COLOR", None)

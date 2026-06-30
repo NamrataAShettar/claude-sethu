@@ -2,10 +2,11 @@
   <img src="assets/icon.svg" width="128" height="128" alt="sethu icon — a bridge over a command prompt">
 </p>
 
-# sethu सेतु — a command bridge for Claude Code
+# `|^=^|` sethu सेतु — a command bridge for Claude Code
 
 **सेतु** means *"bridge."* It lets you run terminal commands straight from
-Claude Code's prompt box, for free.
+Claude Code's prompt box, for free. Its mark — `|^=^|` — a little suspension
+bridge, and it prefixes every result so you can tell sethu's output at a glance.
 
 ```text
 sethu --allow "git status"      # allow a command (safe by default — allowlist is empty)
