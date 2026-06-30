@@ -233,8 +233,38 @@ def process(prompt, data):
 
 
 # ── management CLI ─────────────────────────────────────────────────────────────
+def help_text():
+    cfg = load_config()
+    return f"""sethu सेतु — run terminal commands from Claude's prompt box.
+
+In the prompt (no `!` needed — costs zero tokens):
+  > <cmd>        run an allowlisted command; output shown to you, model blocked
+  >> <cmd>       run it AND send the output to Claude (this costs tokens)
+
+Manage it (type `sethu …` in the prompt or a terminal):
+  sethu                      show this help
+  sethu --runner             show current config
+  sethu --allow "<cmd>"      allow a command      sethu --unallow "<cmd>"
+  sethu --launch "<cmd>"     open in a terminal   sethu --unlaunch "<cmd>"
+  sethu --mode {'|'.join(MODES)}
+  sethu --prefix ">"         change the trigger
+  sethu --help               full flag reference
+
+Modes: stateless (no state) · cwd (cd persists — default) · shell (cd/export/venv persist)
+Safety: the allowlist is empty by default; a command runs only if you allow it.
+Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)"""
+
+
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="sethu", description="sethu — run commands from Claude's prompt box")
+    args_list = sys.argv[1:] if argv is None else argv
+    if not args_list:
+        print(help_text())
+        return
+
+    p = argparse.ArgumentParser(
+        prog="sethu", description="sethu — run commands from Claude's prompt box",
+        epilog=help_text(), formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     p.add_argument("--allow", metavar="CMD", help="allow a command for the runner")
     p.add_argument("--unallow", metavar="CMD", help="remove a command from the allowlist")
     p.add_argument("--launch", metavar="CMD", help="add a command to open in a terminal")

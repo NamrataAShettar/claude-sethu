@@ -78,7 +78,12 @@ commands — a genuine persistent shell. The daemon exits after 30 minutes idle.
 
 ## Manage it
 
+Type these as normal messages in the prompt box (no `!`) — the hook intercepts
+`sethu …`, runs it locally, and blocks the model, so it's **free**. Bare `sethu`
+(or `sethu --help`) shows the options.
+
 ```text
+sethu                     # show options / help
 sethu --allow "<cmd>"     sethu --unallow "<cmd>"
 sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a real terminal
 sethu --mode shell        sethu --prefix ">"
