@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Persistent-shell daemon for sethu's `shell` mode.
+
+Holds one long-lived `bash` behind a PTY and serves commands over a Unix socket,
+one command per connection. Because the same bash stays alive across commands,
+state persists: `cd`, `export`, `source`, and venv activation all stick.
+
+Usage (started automatically by the engine):  _shelld.py <socket_path> <cwd>
+
+Protocol: client sends "<command>\\n"; daemon runs it, replies with the captured
+output, closes the connection. The daemon exits after IDLE_TIMEOUT seconds with
+no connections, and on the special command "__SETHU_SHUTDOWN__".
+"""
+import os
+import pty
+import select
+import signal
+import socket
+import sys
+import termios
+import time
+
+IDLE_TIMEOUT = 1800  # 30 minutes
+CMD_TIMEOUT = 60      # max seconds to wait for a command's output
+
+
+def _drain(master, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        r, _, _ = select.select([master], [], [], 0.05)
+        if not r:
+            break
+        try:
+            if not os.read(master, 65536):
+                break
+        except OSError:
+            break
+
+
+def _run(master, cmd):
+    marker = "__SETHU_END_%d__" % time.time_ns()
+    os.write(master, (cmd + "\n").encode("utf-8"))
+    os.write(master, ("printf '\\n%s\\n' \"$?\"\n" % marker).encode("utf-8"))
+    buf = ""
+    end = time.time() + CMD_TIMEOUT
+    while time.time() < end:
+        r, _, _ = select.select([master], [], [], 0.2)
+        if r:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk.decode("utf-8", "replace")
+            if marker in buf:
+                break
+    out = buf.split(marker, 1)[0]
+    return out.strip() or "(no output)"
+
+
+def main():
+    sock_path = sys.argv[1]
+    start_cwd = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~")
+
+    pid, master = pty.fork()
+    if pid == 0:
+        os.chdir(start_cwd if os.path.isdir(start_cwd) else os.path.expanduser("~"))
+        os.execvp("bash", ["bash", "--norc", "--noprofile"])
+        os._exit(1)
+
+    # Disable echo so the typed command isn't mirrored back into the output.
+    try:
+        attrs = termios.tcgetattr(master)
+        attrs[3] &= ~termios.ECHO
+        termios.tcsetattr(master, termios.TCSANOW, attrs)
+    except Exception:
+        pass
+    os.write(master, b"export PS1='' PS2='' ; stty -echo 2>/dev/null\n")
+    _drain(master, 0.4)
+
+    try:
+        os.unlink(sock_path)
+    except OSError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(sock_path)
+    srv.listen(8)
+    srv.settimeout(IDLE_TIMEOUT)
+
+    try:
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except socket.timeout:
+                break  # idle — shut down
+            try:
+                conn.settimeout(5)
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                cmd = data.decode("utf-8", "replace").rstrip("\n")
+                if cmd == "__SETHU_SHUTDOWN__":
+                    conn.close()
+                    break
+                conn.sendall(_run(master, cmd).encode("utf-8", "replace"))
+            except Exception:
+                pass
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+    finally:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+        try:
+            os.unlink(sock_path)
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    main()

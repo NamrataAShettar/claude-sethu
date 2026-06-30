@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Launcher for the sethu management CLI, so you can type `sethu --allow ...`,
+# `sethu --mode shell`, `sethu --runner`, etc. Override the engine location with
+# SETHU_ENGINE.
+exec python3 "${SETHU_ENGINE:-$HOME/.claude/plugins/marketplaces/sethu/hooks/_engine.py}" "$@"

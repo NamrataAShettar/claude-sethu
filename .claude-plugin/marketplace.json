@@ -1,0 +1,14 @@
+{
+  "name": "sethu",
+  "description": "A bridge for running terminal commands from Claude Code's prompt box, for free.",
+  "owner": {
+    "name": "namrataashettar"
+  },
+  "plugins": [
+    {
+      "name": "sethu",
+      "source": "./",
+      "description": "Run allowlisted commands from the prompt box: `> cmd` is free (blocks the model), `>> cmd` pipes output to Claude."
+    }
+  ]
+}

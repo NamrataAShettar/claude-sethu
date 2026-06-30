@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""sethu (सेतु, "bridge") — run commands from Claude Code's prompt box.
+
+Type a command prefixed with `>` as a normal message and the UserPromptSubmit
+hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
+API tokens (the model never sees it). `>>` instead pipes the output into
+Claude's context so it can act on the result.
+
+Safety: commands run only if they're on your allowlist (empty by default).
+`cd` is exempt (it just moves the working directory, runs nothing).
+
+Statefulness has three selectable modes (`sethu --mode <mode>`):
+  • stateless — each command is its own subprocess; cd doesn't persist
+  • cwd       — a per-session working directory persists across commands (cd works)
+  • shell     — a real persistent bash (PTY daemon); cd, export, source, venvs
+                all persist
+
+This file is both the importable engine (used by the hook) and the management
+CLI (`sethu --allow ...`, `--mode ...`, `--runner`).
+"""
+import argparse
+import json
+import os
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+
+DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": []}
+MODES = ("stateless", "cwd", "shell")
+
+
+# ── config ───────────────────────────────────────────────────────────────────
+def config_path():
+    return os.environ.get("SETHU_CONFIG") or os.path.expanduser("~/.claude/sethu.json")
+
+
+def load_config():
+    cfg = {k: (list(v) if isinstance(v, list) else v) for k, v in DEFAULTS.items()}
+    try:
+        with open(config_path()) as f:
+            user = json.load(f)
+        if isinstance(user, dict):
+            for k in DEFAULTS:
+                if k in user:
+                    cfg[k] = user[k]
+    except Exception:
+        pass
+    return cfg
+
+
+def save_config(cfg):
+    path = config_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({k: cfg[k] for k in DEFAULTS}, f, indent=2)
+        f.write("\n")
+
+
+# ── allow / launch matching ───────────────────────────────────────────────────
+def _matches(cmd, entries):
+    cmd = cmd.strip()
+    return any(cmd == e or cmd.startswith(e + " ") for e in entries)
+
+
+def is_cd(cmd):
+    return cmd == "cd" or cmd.startswith("cd ")
+
+
+# ── per-session working directory (cwd mode) ──────────────────────────────────
+def _cwd_file(sid):
+    safe = "".join(c for c in (sid or "default") if c.isalnum() or c in "-_")
+    return os.path.join(tempfile.gettempdir(), f"sethu-cwd-{safe}")
+
+
+def get_cwd(sid, default):
+    try:
+        with open(_cwd_file(sid)) as f:
+            p = f.read().strip()
+        if p and os.path.isdir(p):
+            return p
+    except Exception:
+        pass
+    return default if (default and os.path.isdir(default)) else os.path.expanduser("~")
+
+
+def set_cwd(sid, path):
+    try:
+        with open(_cwd_file(sid), "w") as f:
+            f.write(path)
+    except Exception:
+        pass
+
+
+def resolve_cd(arg, base):
+    arg = (arg or "").strip().strip('"').strip("'")
+    if not arg or arg == "~":
+        return os.path.expanduser("~")
+    arg = os.path.expanduser(arg)
+    if not os.path.isabs(arg):
+        arg = os.path.join(base, arg)
+    return os.path.normpath(arg)
+
+
+# ── command execution ─────────────────────────────────────────────────────────
+def run_capture(cmd, cwd=None):
+    env = dict(os.environ, NO_COLOR="1")
+    try:
+        r = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=60, env=env,
+            cwd=cwd if (cwd and os.path.isdir(cwd)) else None,
+        )
+        out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
+        return out.strip() or "(no output)"
+    except Exception as e:
+        return f"error: {e}"
+
+
+def launch_in_terminal(cmd):
+    if os.environ.get("TMUX"):
+        try:
+            subprocess.run(["tmux", "split-window", "-h", cmd], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return "↗ opened in a new tmux pane"
+        except Exception:
+            pass
+    if sys.platform == "darwin":
+        try:
+            fd, path = tempfile.mkstemp(suffix=".command")
+            with os.fdopen(fd, "w") as f:
+                f.write("#!/bin/bash\n" + cmd + "\n")
+            os.chmod(path, 0o755)
+            subprocess.run(["open", path], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return "↗ opened in a new Terminal window"
+        except Exception:
+            pass
+    return None
+
+
+# ── persistent shell (shell mode) ─────────────────────────────────────────────
+def _sock_path(sid):
+    safe = "".join(c for c in (sid or "default") if c.isalnum() or c in "-_")
+    return os.path.join(tempfile.gettempdir(), f"sethu-shell-{safe}.sock")
+
+
+def shell_run(sid, cmd, cwd_hint=None):
+    sock = _sock_path(sid)
+    if not os.path.exists(sock):
+        shelld = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shelld.py")
+        subprocess.Popen(
+            [sys.executable, shelld, sock, cwd_hint or os.path.expanduser("~")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+        for _ in range(60):
+            if os.path.exists(sock):
+                break
+            time.sleep(0.05)
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(65)
+        s.connect(sock)
+        s.sendall((cmd + "\n").encode("utf-8"))
+        data = b""
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+        s.close()
+        return data.decode("utf-8", "replace").strip() or "(no output)"
+    except Exception as e:
+        return f"sethu shell error: {e}"
+
+
+# ── the core: process one submitted prompt ────────────────────────────────────
+HELP = ("sethu: type `> <command>` to run an allowlisted command (free), or "
+        "`>> <command>` to also send its output to Claude.\n"
+        "Manage it: `sethu --allow \"<cmd>\"`, `sethu --mode cwd|shell|stateless`, "
+        "`sethu --runner`.")
+
+
+def process(prompt, data):
+    """Return one of: {'passthrough':True} | {'block':text} | {'context':text}."""
+    cfg = load_config()
+    prefix = cfg["prefix"]
+    if not prefix or not prompt.startswith(prefix):
+        return {"passthrough": True}
+
+    pipe = prompt.startswith(prefix * 2)
+    cmd = prompt[len(prefix) * (2 if pipe else 1):].strip()
+    if not cmd:
+        return {"block": HELP}
+
+    if _matches(cmd, cfg["launch"]):
+        status = launch_in_terminal(cmd)
+        return {"block": status or f"Couldn't open a terminal — run `{cmd}` yourself."}
+
+    mode = cfg.get("mode", "cwd")
+    sid = data.get("session_id")
+    base = get_cwd(sid, data.get("cwd"))
+
+    # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
+    if is_cd(cmd) and mode != "shell":
+        if mode == "cwd":
+            target = resolve_cd(cmd[2:], base)
+            if os.path.isdir(target):
+                set_cwd(sid, target)
+                return {"block": f"→ {target}"}
+            return {"block": f"cd: not a directory: {target}"}
+        return {"block": "stateless mode — cd doesn't persist. Use an inline path "
+                         "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`)."}
+
+    if not is_cd(cmd) and not _matches(cmd, cfg["allow"]):
+        return {"block":
+                f"`{cmd}` isn't allowed (nothing runs unless you allow it).\n"
+                f"  • Allow it:        sethu --allow \"{cmd}\"\n"
+                f"  • Open a terminal: sethu --launch \"{cmd}\"\n"
+                f"  • See config:      sethu --runner"}
+
+    if mode == "shell":
+        out = shell_run(sid, cmd, cwd_hint=data.get("cwd"))
+    elif mode == "stateless":
+        out = run_capture(cmd, cwd=data.get("cwd"))
+    else:  # cwd
+        out = run_capture(cmd, cwd=base)
+
+    if pipe:
+        return {"context": f"Output of `{cmd}`:\n{out}"}
+    return {"block": out}
+
+
+# ── management CLI ─────────────────────────────────────────────────────────────
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="sethu", description="sethu — run commands from Claude's prompt box")
+    p.add_argument("--allow", metavar="CMD", help="allow a command for the runner")
+    p.add_argument("--unallow", metavar="CMD", help="remove a command from the allowlist")
+    p.add_argument("--launch", metavar="CMD", help="add a command to open in a terminal")
+    p.add_argument("--unlaunch", metavar="CMD", help="remove a command from the launch list")
+    p.add_argument("--mode", choices=MODES, help="set statefulness mode")
+    p.add_argument("--prefix", help="set the trigger prefix (default '>')")
+    p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
+    a = p.parse_args(argv)
+
+    cfg = load_config()
+    changed = False
+    for field, key in (("allow", "allow"), ("launch", "launch")):
+        val = getattr(a, field)
+        if val:
+            if val not in cfg[key]:
+                cfg[key].append(val)
+            print(f"✔ added to {key}: {val!r}")
+            changed = True
+    for field, key in (("unallow", "allow"), ("unlaunch", "launch")):
+        val = getattr(a, field)
+        if val:
+            if val in cfg[key]:
+                cfg[key].remove(val)
+            print(f"✔ removed from {key}: {val!r}")
+            changed = True
+    if a.mode:
+        cfg["mode"] = a.mode
+        print(f"✔ mode: {a.mode}")
+        changed = True
+    if a.prefix:
+        cfg["prefix"] = a.prefix
+        print(f"✔ prefix: {a.prefix!r}")
+        changed = True
+    if changed:
+        save_config(cfg)
+        return
+    # default / --runner: show config
+    print(f"sethu config ({config_path()}):")
+    print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
+    print(f"  mode:   {cfg['mode']}   (one of: {', '.join(MODES)})")
+    print(f"  allow:  {cfg['allow']}")
+    print(f"  launch: {cfg['launch']}")
+
+
+if __name__ == "__main__":
+    main()
