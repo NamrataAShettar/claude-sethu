@@ -182,6 +182,18 @@ class TestColor(Base):
         self.write(readonly=True, color=False)
         self.assertNotIn("\033[", self.proc("> ls")["block"])
 
+    def test_failure_is_red(self):
+        os.environ.pop("NO_COLOR", None)
+        self.write(allow=["false"])
+        r = self.proc("> false")           # exits nonzero
+        self.assertIn("exit 1", r["block"])
+        self.assertIn("38;5;203", r["block"])  # the red used for failures
+
+    def test_success_is_not_red(self):
+        os.environ.pop("NO_COLOR", None)
+        self.write(allow=["true"])
+        self.assertNotIn("38;5;203", self.proc("> true")["block"])
+
     def test_no_color_env_disables(self):
         self.write(readonly=True)
         os.environ["NO_COLOR"] = "1"

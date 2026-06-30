@@ -38,13 +38,13 @@ MODES = ("stateless", "cwd", "shell")
 # per Okabe-Ito. Off via `sethu --color off` or the NO_COLOR env var. Only the
 # header is colored — the command's own output is left untouched.
 _ANSI = {
-    "ok": "38;5;75",     # sky blue   — success (exit 0)
-    "fail": "38;5;208",  # orange     — nonzero exit
-    "warn": "38;5;214",  # amber      — no exit code
-    "tag": "38;5;37",    # teal       — the [mode] tag
-    "trust": "38;5;208", # orange     — the ⚠trust warning
-    "cmd": "1",          # bold       — the command that ran
-    "dim": "2",          # dim        — separators ( · $ )
+    "ok": "38;5;75",       # sky blue   — success (exit 0)
+    "fail": "1;38;5;203",  # bold red   — nonzero exit (errors stand out)
+    "warn": "38;5;214",    # amber      — no exit code (timeout/unknown)
+    "tag": "38;5;37",      # teal       — the [mode] tag
+    "trust": "38;5;208",   # orange     — the ⚠trust warning
+    "cmd": "1",            # bold       — the command that ran
+    "dim": "2",            # dim        — separators ( · $ )
 }
 
 
