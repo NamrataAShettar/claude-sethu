@@ -19,6 +19,7 @@ This file is both the importable engine (used by the hook) and the management
 CLI (`sethu --allow ...`, `--mode ...`, `--runner`).
 """
 import argparse
+import glob
 import json
 import os
 import re
@@ -215,6 +216,27 @@ def _sock_path(sid):
     return os.path.join(tempfile.gettempdir(), f"sethu-shell-{safe}-p{_PROTO}.sock")
 
 
+def kill_daemons():
+    """Gracefully shut down all sethu shell daemons and remove their sockets.
+    Each session respawns a fresh daemon on its next command. Returns the count."""
+    n = 0
+    for sock in glob.glob(os.path.join(tempfile.gettempdir(), "sethu-shell-*.sock")):
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect(sock)
+            s.sendall(b"__SETHU_SHUTDOWN__\n")
+            s.close()
+            n += 1
+        except Exception:
+            pass
+        try:
+            os.unlink(sock)
+        except OSError:
+            pass
+    return n
+
+
 def shell_run(sid, cmd, cwd_hint=None):
     sock = _sock_path(sid)
     if not os.path.exists(sock):
@@ -347,6 +369,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --launch "<cmd>"     open in a terminal   sethu --unlaunch "<cmd>"
   sethu --readonly on        auto-allow read-only commands (ls, cat, git log…)
   sethu --mode {'|'.join(MODES)}
+  sethu --restart            restart the persistent shell(s) (clear shell state)
   sethu --prefix ">"         change the trigger
   sethu --help               full flag reference
 
@@ -373,8 +396,14 @@ def main(argv=None):
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
     p.add_argument("--readonly", choices=["on", "off"],
                    help="auto-allow a curated set of read-only commands")
+    p.add_argument("--restart", action="store_true",
+                   help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
     a = p.parse_args(argv)
+
+    if a.restart:
+        print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
+        return
 
     cfg = load_config()
     changed = False
@@ -394,7 +423,9 @@ def main(argv=None):
             changed = True
     if a.mode:
         cfg["mode"] = a.mode
-        print(f"✔ mode: {a.mode}")
+        killed = kill_daemons()  # start the new mode from a clean slate
+        note = f" (restarted {killed} shell daemon(s))" if killed else ""
+        print(f"✔ mode: {a.mode}{note}")
         changed = True
     if a.prefix:
         cfg["prefix"] = a.prefix

@@ -111,6 +111,8 @@ command substitution (`` ` ``, `$()`), or backgrounding. So `> ls; rm -rf ~`,
 In `shell` mode, one long-lived bash serves your commands over a Unix socket, so
 `cd`, environment variables, `source`, and virtualenvs all carry across
 commands — a genuine persistent shell. The daemon exits after 30 minutes idle.
+Switching modes (`sethu --mode …`) auto-restarts it, and `sethu --restart`
+clears it on demand for a fresh shell.
 
 ## Manage it
 
@@ -122,7 +124,8 @@ Type these as normal messages in the prompt box (no `!`) — the hook intercepts
 sethu                     # show options / help
 sethu --allow "<cmd>"     sethu --unallow "<cmd>"
 sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a real terminal
-sethu --mode shell        sethu --prefix ">"
+sethu --readonly on       sethu --mode shell        sethu --prefix ">"
+sethu --restart           # restart the persistent shell(s) — clears shell-mode state
 sethu --runner            # show the current config (~/.claude/sethu.json)
 ```
 
