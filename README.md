@@ -213,7 +213,7 @@ work: `sethu --mode shell` ≡ `sethu mode shell`, `sethu --allow "git status"` 
 ```text
 sethu                     # show options / help
 sethu --allow "<cmd>"     sethu --unallow "<cmd>"
-sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a real terminal
+sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a pane/window now
 sethu --readonly on       sethu --mode shell        sethu --prefix ">"
 sethu --restart           # restart the persistent shell(s) — clears shell-mode state
 sethu --runner            # show the current config (~/.claude/sethu.json)

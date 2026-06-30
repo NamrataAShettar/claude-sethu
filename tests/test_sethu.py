@@ -270,6 +270,12 @@ class TestNormalizeArgv(unittest.TestCase):
 
 
 class TestLaunch(Base):
+    def test_osa_escaping(self):
+        # Quotes and backslashes must be escaped so the AppleScript literal is
+        # well-formed and can't break out of the string.
+        self.assertEqual(_engine._osa_str('say "hi"'), 'say \\"hi\\"')
+        self.assertEqual(_engine._osa_str('a\\b'), 'a\\\\b')
+
     def test_launch_registers_and_opens_now(self):
         # `sethu --launch vi` must both add vi to the launch list AND try to open
         # it immediately (the verb is an action, not just registration).

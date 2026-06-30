@@ -230,22 +230,69 @@ def run_capture(cmd, cwd=None):
         return (f"error: {e}", None)
 
 
+def _run_quiet(argv):
+    subprocess.run(argv, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _osa_str(s):
+    """Escape a string for embedding in an AppleScript double-quoted literal."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def launch_in_terminal(cmd):
+    """Open `cmd` in a *usable* shell next to the current one. Prefers a split
+    pane in whatever you're using (tmux, then iTerm2), then a Terminal.app
+    window. The command runs inside a real interactive shell, so the pane stays
+    open and usable after the command exits. Returns a status string, or None if
+    nothing could be opened (e.g. a plain SSH session with no GUI / multiplexer)."""
+    shell = os.environ.get("SHELL", "/bin/bash")
+    term = os.environ.get("TERM_PROGRAM", "")
+
+    # 1) Inside tmux → split the current window. `exec $SHELL` after the command
+    #    keeps the pane alive as a normal shell instead of closing on exit.
     if os.environ.get("TMUX"):
         try:
-            subprocess.run(["tmux", "split-window", "-h", cmd], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _run_quiet(["tmux", "split-window", "-h", f"{cmd}; exec {shell}"])
             return "↗ opened in a new tmux pane"
         except Exception:
             pass
+
+    # 2) iTerm2 → split the current session into a pane and type the command into
+    #    its shell (so it's a real, reusable shell, not a one-shot).
+    if term == "iTerm.app" and sys.platform == "darwin":
+        script = ('tell application "iTerm2"\n'
+                  '  tell current session of current window\n'
+                  '    set s to (split vertically with default profile)\n'
+                  '  end tell\n'
+                  f'  tell s to write text "{_osa_str(cmd)}"\n'
+                  'end tell')
+        try:
+            _run_quiet(["osascript", "-e", script])
+            return "↗ opened in a new iTerm pane"
+        except Exception:
+            pass
+
+    # 3) macOS fallback → a Terminal.app window. `do script` runs the command in a
+    #    fresh interactive shell, so the window stays usable afterwards.
     if sys.platform == "darwin":
+        script = ('tell application "Terminal"\n'
+                  '  activate\n'
+                  f'  do script "{_osa_str(cmd)}"\n'
+                  'end tell')
+        try:
+            _run_quiet(["osascript", "-e", script])
+            return "↗ opened in a new Terminal window"
+        except Exception:
+            pass
+        # Last resort if Automation permission is denied: a .command file that
+        # drops into a login shell after the command, so it isn't a one-shot.
         try:
             fd, path = tempfile.mkstemp(suffix=".command")
             with os.fdopen(fd, "w") as f:
-                f.write("#!/bin/bash\n" + cmd + "\n")
+                f.write(f"#!/bin/bash\n{cmd}\nexec {shell} -l\n")
             os.chmod(path, 0o755)
-            subprocess.run(["open", path], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            _run_quiet(["open", path])
             return "↗ opened in a new Terminal window"
         except Exception:
             pass
