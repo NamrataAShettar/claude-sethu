@@ -137,10 +137,25 @@ command substitution (`` ` ``, `$()`), or backgrounding. So `> ls; rm -rf ~`,
 `> echo x > f`, `> cat f | sh`, `> git push`, and `> find . -delete` are all
 **refused**. Your explicit `--allow` entries still work on top.
 
+## Trust mode (opt-in footgun)
+
+If you want `>` to behave like an unrestricted terminal — run *anything*, no
+allowlist — turn on trust mode:
+
+```
+sethu --trust on      # ⚠ bypasses the allowlist; ANY `>` command runs
+```
+
+The allowlist exists because the runner executes in your shell **without** Claude
+Code's permission prompts, so a stray line after `>` would auto-run. Trust mode
+removes that guard, so use it only when you accept that. It's visible while
+active — the status line shows `[shell ⚠trust]` — and `sethu --readonly on`
+remains the safer middle ground (inspection commands free, writes refused).
+
 ## Safety
 
 - The **allowlist is empty by default** — nothing runs until you `sethu --allow "<cmd>"`
-  (or turn on read-only mode).
+  (or turn on read-only mode, or — at your own risk — trust mode).
 - A command runs only if it matches an allow entry exactly or as `"<entry> …"`,
   so `> rm -rf …` is refused unless explicitly allowed.
 - ⚠️ The runner executes in your shell and **bypasses Claude Code's permission

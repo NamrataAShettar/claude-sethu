@@ -30,7 +30,8 @@ import sys
 import tempfile
 import time
 
-DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [], "readonly": False}
+DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
+            "readonly": False, "trust": False}
 MODES = ("stateless", "cwd", "shell")
 
 
@@ -325,7 +326,7 @@ def process(prompt, data):
         return {"block": "stateless mode — cd doesn't persist. Use an inline path "
                          "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`)."}
 
-    allowed = _matches(cmd, cfg["allow"]) or (
+    allowed = cfg.get("trust") or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
     if not is_cd(cmd) and not allowed:
@@ -355,10 +356,11 @@ def process(prompt, data):
     else:  # cwd
         out, code = run_capture(cmd, cwd=base)
 
-    # Completion header: which mode + done/failed + exit code.
+    # Completion header: which mode (+ trust warning) + done/failed + exit code.
     mark = "✓" if code == 0 else ("✗" if code is not None else "⚠")
     status = f"exit {code}" if code is not None else "no exit code"
-    header = f"[{mode}] {mark} {status} · $ {cmd}"
+    tag = mode + (" ⚠trust" if cfg.get("trust") else "")
+    header = f"[{tag}] {mark} {status} · $ {cmd}"
     body = f"{header}\n{out}"
 
     if pipe:
@@ -381,6 +383,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --allow "<cmd>"      allow a command      sethu --unallow "<cmd>"
   sethu --launch "<cmd>"     open in a terminal   sethu --unlaunch "<cmd>"
   sethu --readonly on        auto-allow read-only commands (ls, cat, git log…)
+  sethu --trust on           bypass the allowlist — run ANY command (footgun)
   sethu --mode {'|'.join(MODES)}
   sethu --restart            restart the persistent shell(s) (clear shell state)
   sethu --prefix ">"         change the trigger
@@ -392,7 +395,7 @@ Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
-               "prefix", "restart", "runner", "show", "help"}
+               "trust", "prefix", "restart", "runner", "show", "help"}
 
 
 def normalize_argv(argv):
@@ -427,6 +430,8 @@ def main(argv=None):
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
     p.add_argument("--readonly", choices=["on", "off"],
                    help="auto-allow a curated set of read-only commands")
+    p.add_argument("--trust", choices=["on", "off"],
+                   help="bypass the allowlist — run ANY command (footgun)")
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
@@ -466,6 +471,15 @@ def main(argv=None):
         cfg["readonly"] = (a.readonly == "on")
         print(f"✔ readonly: {a.readonly}")
         changed = True
+    if a.trust:
+        cfg["trust"] = (a.trust == "on")
+        if cfg["trust"]:
+            print("⚠ trust ON — the allowlist is bypassed; ANY `>` command will run, "
+                  "with no permission prompt. Prefer `sethu --readonly on` for safety. "
+                  "Turn it off with `sethu --trust off`.")
+        else:
+            print("✔ trust: off (allowlist enforced again)")
+        changed = True
     if changed:
         save_config(cfg)
         return
@@ -474,6 +488,7 @@ def main(argv=None):
     print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
     print(f"  mode:     {cfg['mode']}   (one of: {', '.join(MODES)})")
     print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (auto-allow read-only cmds)")
+    print(f"  trust:    {'ON ⚠ allowlist bypassed' if cfg.get('trust') else 'off'}")
     print(f"  allow:    {cfg['allow']}")
     print(f"  launch:   {cfg['launch']}")
 

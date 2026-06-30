@@ -82,6 +82,22 @@ class TestSafety(Base):
         self.assertIn("interactive", self.proc("> vi")["block"])
 
 
+class TestTrust(Base):
+    def test_trust_bypasses_allowlist(self):
+        self.write(trust=True)  # nothing allowlisted
+        r = self.proc("> echo trusted")
+        self.assertNotIn("isn't allowed", r["block"])
+        self.assertIn("trusted", r["block"])
+
+    def test_trust_marker_in_header(self):
+        self.write(trust=True)
+        self.assertIn("trust", self.proc("> echo x")["block"])
+
+    def test_trust_still_refuses_interactive(self):
+        self.write(trust=True)
+        self.assertIn("interactive", self.proc("> vim x")["block"])
+
+
 class TestRunner(Base):
     def test_explicit_allow_runs(self):
         self.write(allow=["echo"])
