@@ -269,6 +269,21 @@ class TestNormalizeArgv(unittest.TestCase):
         self.assertEqual(n([]), [])
 
 
+class TestLaunch(Base):
+    def test_launch_registers_and_opens_now(self):
+        # `sethu --launch vi` must both add vi to the launch list AND try to open
+        # it immediately (the verb is an action, not just registration).
+        opened = []
+        orig = _engine.launch_in_terminal
+        _engine.launch_in_terminal = lambda c: opened.append(c) or "↗ opened"
+        try:
+            _engine.main(["--launch", "vi"])
+        finally:
+            _engine.launch_in_terminal = orig
+        self.assertEqual(opened, ["vi"])               # opened now
+        self.assertIn("vi", _engine.load_config()["launch"])  # and registered
+
+
 class TestFirstRunHint(Base):
     def test_fires_once_then_silent(self):
         first = _engine.first_run_hint()

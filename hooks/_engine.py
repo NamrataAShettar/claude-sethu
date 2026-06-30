@@ -532,13 +532,26 @@ def main(argv=None):
 
     cfg = load_config()
     changed = False
-    for field, key in (("allow", "allow"), ("launch", "launch")):
-        val = getattr(a, field)
-        if val:
-            if val not in cfg[key]:
-                cfg[key].append(val)
-            print(f"✔ added to {key}: {val!r}")
-            changed = True
+    if a.allow:
+        if a.allow not in cfg["allow"]:
+            cfg["allow"].append(a.allow)
+        print(f"✔ added to allow: {a.allow!r}")
+        changed = True
+    if a.launch:
+        val = a.launch
+        if val not in cfg["launch"]:
+            cfg["launch"].append(val)
+        changed = True
+        # "launch" is a verb — open it now, not just register it. From here on
+        # `> <val>` opens a terminal too (that's what the launch list is for).
+        status = launch_in_terminal(val)
+        if status:
+            print(f"✔ {status} — opened {val!r}. From now on `> {val}` opens a "
+                  f"terminal too.")
+        else:
+            print(f"✔ added {val!r} to the launch list — `> {val}` will open it in a "
+                  f"terminal. (Couldn't open one now — no tmux pane, and auto-open "
+                  f"is macOS/tmux only; run `{val}` in your terminal.)")
     for field, key in (("unallow", "allow"), ("unlaunch", "launch")):
         val = getattr(a, field)
         if val:
