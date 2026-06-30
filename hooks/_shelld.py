@@ -13,6 +13,7 @@ no connections, and on the special command "__SETHU_SHUTDOWN__".
 """
 import os
 import pty
+import re
 import select
 import signal
 import socket
@@ -40,7 +41,8 @@ def _drain(master, seconds):
 def _run(master, cmd):
     marker = "__SETHU_END_%d__" % time.time_ns()
     os.write(master, (cmd + "\n").encode("utf-8"))
-    os.write(master, ("printf '\\n%s\\n' \"$?\"\n" % marker).encode("utf-8"))
+    # Emit the marker followed by the exit code so the client can report status.
+    os.write(master, ("printf '\\n%s %%s\\n' \"$?\"\n" % marker).encode("utf-8"))
     buf = ""
     end = time.time() + CMD_TIMEOUT
     while time.time() < end:
@@ -55,8 +57,11 @@ def _run(master, cmd):
             buf += chunk.decode("utf-8", "replace")
             if marker in buf:
                 break
-    out = buf.split(marker, 1)[0]
-    return out.strip() or "(no output)"
+    out = buf.split(marker, 1)[0].strip() or "(no output)"
+    after = buf.split(marker, 1)[1] if marker in buf else ""
+    m = re.search(r"-?\d+", after)
+    code = m.group() if m else ""
+    return f"{code}\n{out}"
 
 
 def main():

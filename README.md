@@ -14,6 +14,19 @@ intercepts it, runs it locally, and **blocks the prompt** — so the model never
 sees it and you spend **no tokens**. Use `>>` when you *want* Claude to see the
 output.
 
+Each result starts with a status line showing the active **mode**, completion,
+exit code, and the command:
+
+```text
+[cwd] ✓ exit 0 · $ git status
+On branch main …
+```
+
+> Claude Code prefixes blocked-prompt output with *"UserPromptSubmit operation
+> blocked by hook:"* — that's the harness telling you the prompt was handled
+> locally and never hit the model (i.e. it worked, for free). It can't be
+> removed by a plugin; the status line above makes the result read as intended.
+
 > Why this is free (and `!` isn't): bang mode adds output to context and (since
 > Claude Code v2.1.186) makes Claude respond — that costs tokens. sethu blocks
 > the prompt entirely, so nothing reaches the model unless you ask with `>>`.

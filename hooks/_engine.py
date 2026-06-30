@@ -162,6 +162,7 @@ def is_readonly_safe(cmd):
 
 
 def run_capture(cmd, cwd=None):
+    """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error."""
     # GIT_PAGER/PAGER=cat so paged commands (git log, etc.) never block on a pager.
     env = dict(os.environ, NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
     try:
@@ -173,12 +174,12 @@ def run_capture(cmd, cwd=None):
             cwd=cwd if (cwd and os.path.isdir(cwd)) else None,
         )
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
-        return out.strip() or "(no output)"
+        return (out.strip() or "(no output)", r.returncode)
     except subprocess.TimeoutExpired:
         return ("timed out (20s). If it's interactive or long-running, open it in "
-                f"a terminal instead: sethu --launch \"{cmd}\"")
+                f"a terminal instead: sethu --launch \"{cmd}\"", None)
     except Exception as e:
-        return f"error: {e}"
+        return (f"error: {e}", None)
 
 
 def launch_in_terminal(cmd):
@@ -234,9 +235,13 @@ def shell_run(sid, cmd, cwd_hint=None):
                 break
             data += chunk
         s.close()
-        return data.decode("utf-8", "replace").strip() or "(no output)"
+        # daemon replies "<exit_code>\n<output>"
+        text = data.decode("utf-8", "replace")
+        first, _, rest = text.partition("\n")
+        code = int(first) if first.strip().lstrip("-").isdigit() else None
+        return (rest.strip() or "(no output)", code)
     except Exception as e:
-        return f"sethu shell error: {e}"
+        return (f"sethu shell error: {e}", None)
 
 
 # ── the core: process one submitted prompt ────────────────────────────────────
@@ -301,15 +306,21 @@ def process(prompt, data):
                 f"then run `> {cmd}` (or just run it in your terminal)."}
 
     if mode == "shell":
-        out = shell_run(sid, cmd, cwd_hint=data.get("cwd"))
+        out, code = shell_run(sid, cmd, cwd_hint=data.get("cwd"))
     elif mode == "stateless":
-        out = run_capture(cmd, cwd=data.get("cwd"))
+        out, code = run_capture(cmd, cwd=data.get("cwd"))
     else:  # cwd
-        out = run_capture(cmd, cwd=base)
+        out, code = run_capture(cmd, cwd=base)
+
+    # Completion header: which mode + done/failed + exit code.
+    mark = "✓" if code == 0 else ("✗" if code is not None else "⚠")
+    status = f"exit {code}" if code is not None else "no exit code"
+    header = f"[{mode}] {mark} {status} · $ {cmd}"
+    body = f"{header}\n{out}"
 
     if pipe:
-        return {"context": f"Output of `{cmd}`:\n{out}"}
-    return {"block": out}
+        return {"context": f"Output of `{cmd}` ({status}):\n{out}"}
+    return {"block": body}
 
 
 # ── management CLI ─────────────────────────────────────────────────────────────
