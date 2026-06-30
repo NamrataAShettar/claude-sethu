@@ -21,13 +21,14 @@ CLI (`sethu --allow ...`, `--mode ...`, `--runner`).
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 
-DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": []}
+DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [], "readonly": False}
 MODES = ("stateless", "cwd", "shell")
 
 
@@ -118,8 +119,51 @@ def is_interactive(cmd):
     return bool(toks) and os.path.basename(toks[0]) in INTERACTIVE
 
 
+# Read-only inspection programs auto-allowed when `readonly` mode is on. Kept
+# conservative on purpose — no sed/awk/xargs/tee (they can write or exec).
+READONLY = {
+    "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "stat", "file",
+    "tree", "which", "type", "command", "date", "whoami", "id", "uname",
+    "hostname", "uptime", "df", "du", "ps", "env", "printenv", "grep", "egrep",
+    "fgrep", "rg", "ag", "cut", "sort", "uniq", "tr", "column", "jq", "yq",
+    "basename", "dirname", "realpath", "readlink", "nl", "tac", "comm", "diff",
+    "cmp", "shasum", "md5", "sha256sum", "cksum", "hexdump", "xxd", "strings",
+    "cal", "look", "fold", "fmt", "rev", "find", "fd", "git",
+}
+READONLY_GIT = {
+    "status", "log", "diff", "show", "branch", "remote", "tag", "describe",
+    "blame", "ls-files", "rev-parse", "shortlog", "stash", "config",
+}
+# Shell metacharacters that enable writes / chaining / substitution / background.
+_DANGER = re.compile(r"[;&`<>]|\$\(")
+
+
+def is_readonly_safe(cmd):
+    """True only if `cmd` is a pipeline of read-only programs with no
+    redirection, chaining, command substitution, or backgrounding."""
+    if _DANGER.search(cmd):
+        return False
+    for seg in cmd.split("|"):
+        toks = seg.split()
+        if not toks:                      # empty segment ⇒ `||`, trailing `|`, etc.
+            return False
+        prog = os.path.basename(toks[0])
+        if prog == "git":
+            sub = toks[1] if len(toks) > 1 else ""
+            if sub not in READONLY_GIT:
+                return False
+        elif prog == "find":
+            if any(t in ("-exec", "-execdir", "-delete", "-ok", "-fprint",
+                         "-fprintf") for t in toks):
+                return False
+        elif prog not in READONLY:
+            return False
+    return True
+
+
 def run_capture(cmd, cwd=None):
-    env = dict(os.environ, NO_COLOR="1")
+    # GIT_PAGER/PAGER=cat so paged commands (git log, etc.) never block on a pager.
+    env = dict(os.environ, NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
     try:
         # stdin=DEVNULL so a program waiting on input gets EOF instead of
         # hanging; timeout well under the 30s UserPromptSubmit hook limit.
@@ -233,10 +277,16 @@ def process(prompt, data):
         return {"block": "stateless mode — cd doesn't persist. Use an inline path "
                          "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`)."}
 
-    if not is_cd(cmd) and not _matches(cmd, cfg["allow"]):
+    allowed = _matches(cmd, cfg["allow"]) or (
+        cfg.get("readonly") and is_readonly_safe(cmd)
+    )
+    if not is_cd(cmd) and not allowed:
+        ro = "" if cfg.get("readonly") else \
+            "  • Auto-allow read-only cmds: sethu --readonly on\n"
         return {"block":
                 f"`{cmd}` isn't allowed (nothing runs unless you allow it).\n"
                 f"  • Allow it:        sethu --allow \"{cmd}\"\n"
+                f"{ro}"
                 f"  • Open a terminal: sethu --launch \"{cmd}\"\n"
                 f"  • See config:      sethu --runner"}
 
@@ -276,6 +326,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --runner             show current config
   sethu --allow "<cmd>"      allow a command      sethu --unallow "<cmd>"
   sethu --launch "<cmd>"     open in a terminal   sethu --unlaunch "<cmd>"
+  sethu --readonly on        auto-allow read-only commands (ls, cat, git log…)
   sethu --mode {'|'.join(MODES)}
   sethu --prefix ">"         change the trigger
   sethu --help               full flag reference
@@ -301,6 +352,8 @@ def main(argv=None):
     p.add_argument("--unlaunch", metavar="CMD", help="remove a command from the launch list")
     p.add_argument("--mode", choices=MODES, help="set statefulness mode")
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
+    p.add_argument("--readonly", choices=["on", "off"],
+                   help="auto-allow a curated set of read-only commands")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
     a = p.parse_args(argv)
 
@@ -328,15 +381,20 @@ def main(argv=None):
         cfg["prefix"] = a.prefix
         print(f"✔ prefix: {a.prefix!r}")
         changed = True
+    if a.readonly:
+        cfg["readonly"] = (a.readonly == "on")
+        print(f"✔ readonly: {a.readonly}")
+        changed = True
     if changed:
         save_config(cfg)
         return
     # default / --runner: show config
     print(f"sethu config ({config_path()}):")
     print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
-    print(f"  mode:   {cfg['mode']}   (one of: {', '.join(MODES)})")
-    print(f"  allow:  {cfg['allow']}")
-    print(f"  launch: {cfg['launch']}")
+    print(f"  mode:     {cfg['mode']}   (one of: {', '.join(MODES)})")
+    print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (auto-allow read-only cmds)")
+    print(f"  allow:    {cfg['allow']}")
+    print(f"  launch:   {cfg['launch']}")
 
 
 if __name__ == "__main__":

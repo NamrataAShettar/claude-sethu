@@ -52,13 +52,36 @@ use it automatically, drop the ready-made snippet from
 > `> cmd` keeps *your* commands out of Claude's context entirely; `quiet` shrinks
 > *Claude's own* commands. Different levers, same goal: fewer tokens.
 
+## Read-only mode — skip the per-command allowlisting
+
+Tired of allowing `ls`, `cat`, `pwd`, `git log` one by one? Turn on read-only
+mode and a curated set of **inspection** commands is auto-allowed:
+
+```
+sethu --readonly on
+> ls
+> git log --oneline -5
+> cat README.md | head        # pipelines of read-only programs are fine
+```
+
+It's deliberately strict so it stays safe — a command is auto-allowed only if it
+is a pipeline of known read-only programs (ls, cat, head, grep, find, read-only
+`git` subcommands, …) with **no** redirection (`>`), chaining (`;`, `&&`),
+command substitution (`` ` ``, `$()`), or backgrounding. So `> ls; rm -rf ~`,
+`> echo x > f`, `> cat f | sh`, `> git push`, and `> find . -delete` are all
+**refused**. Your explicit `--allow` entries still work on top.
+
 ## Safety
 
-- The **allowlist is empty by default** — nothing runs until you `sethu --allow "<cmd>"`.
+- The **allowlist is empty by default** — nothing runs until you `sethu --allow "<cmd>"`
+  (or turn on read-only mode).
 - A command runs only if it matches an allow entry exactly or as `"<entry> …"`,
   so `> rm -rf …` is refused unless explicitly allowed.
 - ⚠️ The runner executes in your shell and **bypasses Claude Code's permission
-  prompts**, so keep the allowlist tight — treat it like shell aliases.
+  prompts**, so keep the allowlist tight — treat it like shell aliases. (Note:
+  an explicit `--allow "git log"` lets you append `> git log …` including pipes,
+  so don't allowlist a command you wouldn't trust with arbitrary trailing args;
+  read-only mode is the injection-hardened option.)
 - `cd` is exempt from the allowlist (it runs nothing — just moves the working
   directory).
 
