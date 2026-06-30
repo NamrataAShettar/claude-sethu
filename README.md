@@ -135,6 +135,19 @@ Config lives in `~/.claude/sethu.json`:
 { "prefix": ">", "mode": "cwd", "allow": ["git status", "ls"], "launch": [] }
 ```
 
+## Tests
+
+Stdlib only — no dependencies. Run them with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+They cover the allowlist, read-only safety (injection/redirection/chaining are
+refused), the interactive guard, all three statefulness modes (including the
+persistent shell), the `>>` pipe, completion headers, and config round-trips.
+GitHub Actions runs them on every push and PR (`.github/workflows/ci.yml`).
+
 ## Companion
 
 sethu (the bridge) is published at

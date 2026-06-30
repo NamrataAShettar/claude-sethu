@@ -250,6 +250,7 @@ def shell_run(sid, cmd, cwd_hint=None):
             if os.path.exists(sock):
                 break
             time.sleep(0.05)
+    s = None
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.settimeout(65)
@@ -261,7 +262,6 @@ def shell_run(sid, cmd, cwd_hint=None):
             if not chunk:
                 break
             data += chunk
-        s.close()
         # daemon replies "<exit_code>\n<output>"
         text = data.decode("utf-8", "replace")
         first, _, rest = text.partition("\n")
@@ -272,6 +272,12 @@ def shell_run(sid, cmd, cwd_hint=None):
         return (text.strip() or "(no output)", None)
     except Exception as e:
         return (f"sethu shell error: {e}", None)
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
 
 
 # ── the core: process one submitted prompt ────────────────────────────────────
