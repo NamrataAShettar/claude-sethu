@@ -123,7 +123,7 @@ def _welcome_marker():
 
 
 FIRST_RUN_HINT = (
-    "🌉 sethu is installed — run terminal commands free from this box. "
+    f"{ICON} sethu is installed — run terminal commands free from this box. "
     "`> git status` shows output to you only (zero tokens); `>> git status` "
     "sends it to Claude. Nothing runs until you allow it — try "
     "`sethu --readonly on`, then type `sethu` for a \"when to use what\" guide."

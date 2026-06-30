@@ -1,7 +1,7 @@
 {
   "name": "sethu",
   "displayName": "sethu सेतु — command bridge",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "description": "सेतु (\"bridge\") — run commands from Claude Code's prompt box. `> cmd` runs an allowlisted command for free (model never sees it); `>> cmd` also pipes the output to Claude.",
   "author": {
     "name": "namrataashettar"
