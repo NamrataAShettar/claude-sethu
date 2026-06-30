@@ -346,7 +346,9 @@ def process(prompt, data):
         return {"block": "stateless mode — cd doesn't persist. Use an inline path "
                          "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`)."}
 
-    allowed = cfg.get("trust") or _matches(cmd, cfg["allow"]) or (
+    # readonly wins if a legacy config somehow has both on (safe default).
+    trust_on = cfg.get("trust") and not cfg.get("readonly")
+    allowed = trust_on or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
     if not is_cd(cmd) and not allowed:
@@ -379,7 +381,7 @@ def process(prompt, data):
     # Completion header: which mode (+ trust warning) + done/failed + exit code.
     mark = "✓" if code == 0 else ("✗" if code is not None else "⚠")
     status = f"exit {code}" if code is not None else "no exit code"
-    tag = mode + (" ⚠trust" if cfg.get("trust") else "")
+    tag = mode + (" ⚠trust" if trust_on else "")
     header = f"[{tag}] {mark} {status} · $ {cmd}"
     body = f"{header}\n{out}"
 
@@ -514,8 +516,15 @@ def main(argv=None):
     print(f"sethu config ({config_path()}):")
     print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
     print(f"  mode:     {cfg['mode']}   (one of: {', '.join(MODES)})")
+    both = cfg.get("readonly") and cfg.get("trust")
     print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (auto-allow read-only cmds)")
-    print(f"  trust:    {'ON ⚠ allowlist bypassed' if cfg.get('trust') else 'off'}")
+    trust_disp = "off"
+    if cfg.get("trust"):
+        trust_disp = "set but OVERRIDDEN by readonly ⚠" if both else "ON ⚠ allowlist bypassed"
+    print(f"  trust:    {trust_disp}")
+    if both:
+        print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
+              "Run `sethu --readonly on` or `sethu --trust off` to clean up.")
     print(f"  allow:    {cfg['allow']}")
     print(f"  launch:   {cfg['launch']}")
 

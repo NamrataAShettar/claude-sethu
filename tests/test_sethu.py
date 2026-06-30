@@ -111,6 +111,13 @@ class TestTrust(Base):
         self.assertTrue(cfg["trust"])
         self.assertFalse(cfg["readonly"])
 
+    def test_readonly_wins_when_both_set(self):
+        # Legacy config with both on → readonly behavior (a write is refused).
+        self.write(readonly=True, trust=True)
+        r = self.proc("> mkdir nope")
+        self.assertIn("isn't allowed", r["block"])
+        self.assertNotIn("trust", r["block"])
+
 
 class TestRunner(Base):
     def test_explicit_allow_runs(self):
