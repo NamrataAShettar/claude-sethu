@@ -104,15 +104,35 @@ def resolve_cd(arg, base):
 
 
 # ── command execution ─────────────────────────────────────────────────────────
+# Programs that take over the terminal — they can't run captured (they'd hang),
+# so the runner refuses them and points you at `--launch` (a real terminal).
+INTERACTIVE = {
+    "vi", "vim", "nvim", "nano", "emacs", "pico", "less", "more", "most", "man",
+    "top", "htop", "btop", "ssh", "telnet", "tmux", "screen", "watch", "fg",
+    "python", "python3", "node", "irb", "psql", "mysql", "sqlite3", "ipython",
+}
+
+
+def is_interactive(cmd):
+    toks = cmd.split()
+    return bool(toks) and os.path.basename(toks[0]) in INTERACTIVE
+
+
 def run_capture(cmd, cwd=None):
     env = dict(os.environ, NO_COLOR="1")
     try:
+        # stdin=DEVNULL so a program waiting on input gets EOF instead of
+        # hanging; timeout well under the 30s UserPromptSubmit hook limit.
         r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=60, env=env,
+            cmd, shell=True, capture_output=True, text=True, timeout=20, env=env,
+            stdin=subprocess.DEVNULL,
             cwd=cwd if (cwd and os.path.isdir(cwd)) else None,
         )
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
         return out.strip() or "(no output)"
+    except subprocess.TimeoutExpired:
+        return ("timed out (20s). If it's interactive or long-running, open it in "
+                f"a terminal instead: sethu --launch \"{cmd}\"")
     except Exception as e:
         return f"error: {e}"
 
@@ -219,6 +239,16 @@ def process(prompt, data):
                 f"  • Allow it:        sethu --allow \"{cmd}\"\n"
                 f"  • Open a terminal: sethu --launch \"{cmd}\"\n"
                 f"  • See config:      sethu --runner"}
+
+    # Interactive programs would hang the captured runner — send them to a real
+    # terminal instead (in any mode).
+    if is_interactive(cmd):
+        first = os.path.basename(cmd.split()[0])
+        return {"block":
+                f"`{first}` is interactive — the runner has no terminal, so it would "
+                f"hang. Open it in a real terminal instead:\n"
+                f"  sethu --launch \"{cmd}\"\n"
+                f"then run `> {cmd}` (or just run it in your terminal)."}
 
     if mode == "shell":
         out = shell_run(sid, cmd, cwd_hint=data.get("cwd"))
