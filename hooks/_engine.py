@@ -489,14 +489,21 @@ def main(argv=None):
         changed = True
     if a.readonly:
         cfg["readonly"] = (a.readonly == "on")
-        print(f"✔ readonly: {a.readonly}")
+        note = ""
+        if cfg["readonly"] and cfg.get("trust"):
+            cfg["trust"] = False          # mutually exclusive with trust
+            note = " (trust turned OFF)"
+        print(f"✔ readonly: {a.readonly}{note}")
         changed = True
     if a.trust:
         cfg["trust"] = (a.trust == "on")
         if cfg["trust"]:
+            ro = ""
+            if cfg.get("readonly"):
+                cfg["readonly"] = False   # mutually exclusive with readonly
+                ro = " (readonly turned OFF.)"
             print("⚠ trust ON — the allowlist is bypassed; ANY `>` command will run, "
-                  "with no permission prompt. Prefer `sethu --readonly on` for safety. "
-                  "Turn it off with `sethu --trust off`.")
+                  f"with no permission prompt.{ro} Turn it off with `sethu --trust off`.")
         else:
             print("✔ trust: off (allowlist enforced again)")
         changed = True

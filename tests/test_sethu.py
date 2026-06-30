@@ -97,6 +97,20 @@ class TestTrust(Base):
         self.write(trust=True)
         self.assertIn("interactive", self.proc("> vim x")["block"])
 
+    def test_readonly_clears_trust(self):
+        self.write(trust=True)
+        _engine.main(["--readonly", "on"])
+        cfg = _engine.load_config()
+        self.assertTrue(cfg["readonly"])
+        self.assertFalse(cfg["trust"])
+
+    def test_trust_clears_readonly(self):
+        self.write(readonly=True)
+        _engine.main(["--trust", "on"])
+        cfg = _engine.load_config()
+        self.assertTrue(cfg["trust"])
+        self.assertFalse(cfg["readonly"])
+
 
 class TestRunner(Base):
     def test_explicit_allow_runs(self):
