@@ -31,7 +31,8 @@ import tempfile
 import time
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
-            "readonly": False, "trust": False, "rc": False, "color": True}
+            "readonly": False, "trust": False, "rc": False, "color": True,
+            "maxLines": 40}
 MODES = ("stateless", "cwd", "shell")
 
 # ANSI colors for the result header. Colorblind-safe (blue/orange, not green/red)
@@ -54,6 +55,38 @@ def _color_on(cfg):
 
 def _c(text, key, on):
     return f"\033[{_ANSI[key]}m{text}\033[0m" if on else text
+
+
+def _output_path(sid):
+    """Stable per-session file holding the LAST command's full output. Reused
+    (overwritten) each command, so it never accumulates litter."""
+    h = hashlib.md5((sid or "default").encode()).hexdigest()[:12]
+    return os.path.join(tempfile.gettempdir(), f"sethu-out-{h}.log")
+
+
+def _truncate(out, sid, max_lines, on):
+    """If `out` exceeds max_lines, keep the first max_lines and write the full
+    text to the per-session file, returning (display, note). Otherwise return
+    (out, ""). max_lines <= 0 disables truncation. note is a short pointer at
+    the full output for the caller to place (colored for display, plain for the
+    pipe-to-Claude path)."""
+    if max_lines <= 0:
+        return out, ""
+    lines = out.split("\n")
+    if len(lines) <= max_lines:
+        return out, ""
+    path = _output_path(sid)
+    try:
+        with open(path, "w") as f:
+            f.write(out)
+    except Exception:
+        path = None
+    hidden = len(lines) - max_lines
+    shown = "\n".join(lines[:max_lines])
+    where = (f"full output: {path}  (open it, or `sethu --launch \"less {path}\"`)"
+             if path else "full output unavailable (couldn't write temp file)")
+    note = f"… {hidden} more line{'s' if hidden != 1 else ''} truncated · {where}"
+    return shown, note
 
 
 # ── config ───────────────────────────────────────────────────────────────────
@@ -508,10 +541,19 @@ def process(prompt, data):
         tag += " " + _c("⚠trust", "trust", on)
     mark_status = _c(f"{mark} {status}", state, on)
     header = f"{tag} {mark_status} {_c('·', 'dim', on)} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
-    body = f"{header}\n{out}"
+
+    # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
+    # The full text is written to a per-session file; the note points at it.
+    shown, note = _truncate(out, sid, int(cfg.get("maxLines", 40) or 0), on)
 
     if pipe:
-        return {"context": f"Output of `{cmd}` ({status}):\n{out}"}
+        ctx = f"Output of `{cmd}` ({status}):\n{shown}"
+        if note:
+            ctx += f"\n[{note} — read that file if you need the rest.]"
+        return {"context": ctx}
+    body = f"{header}\n{shown}"
+    if note:
+        body += "\n" + _c(note, "dim", on)
     return {"block": body}
 
 
@@ -542,6 +584,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --mode {'|'.join(MODES)}
   sethu --rc on              shell mode: source your shell rc (aliases/functions/env)
   sethu --color off          turn off the colored result header (or NO_COLOR=1)
+  sethu --maxlines 40        cap long output (full output saved to a file); 0 = unlimited
   sethu --restart            restart the persistent shell(s) (clear shell state)
   sethu --prefix ">"         change the trigger
   sethu --help               full flag reference
@@ -552,7 +595,8 @@ Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
-               "trust", "rc", "color", "prefix", "restart", "runner", "show", "help"}
+               "trust", "rc", "color", "maxlines", "prefix", "restart", "runner",
+               "show", "help"}
 
 
 def normalize_argv(argv):
@@ -593,6 +637,8 @@ def main(argv=None):
                    help="in shell mode, source your shell rc (aliases/functions/env)")
     p.add_argument("--color", choices=["on", "off"],
                    help="color the result header (default on; NO_COLOR also disables)")
+    p.add_argument("--maxlines", metavar="N", type=int,
+                   help="truncate output beyond N lines (full output saved to a file); 0 = unlimited")
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
@@ -654,6 +700,11 @@ def main(argv=None):
         cfg["color"] = (a.color == "on")
         print(f"✔ color: {a.color}")
         changed = True
+    if a.maxlines is not None:
+        cfg["maxLines"] = max(0, a.maxlines)
+        disp = "unlimited" if cfg["maxLines"] == 0 else f"{cfg['maxLines']} lines"
+        print(f"✔ maxLines: {disp}")
+        changed = True
     if a.readonly:
         cfg["readonly"] = (a.readonly == "on")
         note = ""
@@ -689,6 +740,8 @@ def main(argv=None):
     print(f"  trust:    {trust_disp}")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (colored result header)")
+    ml = int(cfg.get("maxLines", 40) or 0)
+    print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (truncate long output; full saved to a file)")
     if both:
         print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
               "Run `sethu --readonly on` or `sethu --trust off` to clean up.")

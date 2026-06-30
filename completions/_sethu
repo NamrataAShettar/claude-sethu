@@ -16,6 +16,7 @@ _sethu() {
     'trust:bypass the allowlist — run ANY command (footgun)'
     'rc:shell mode — source your shell rc (aliases/functions/env)'
     'color:color the result header (on/off)'
+    'maxlines:cap long output beyond N lines (0 = unlimited)'
     'prefix:set the trigger prefix'
     'restart:restart the persistent shell(s)'
     'runner:show the current config'
@@ -25,7 +26,7 @@ _sethu() {
     if [[ $words[2] == -* ]]; then
       _values 'flag' \
         '--mode' '--allow' '--unallow' '--launch' '--unlaunch' \
-        '--readonly' '--trust' '--rc' '--color' '--prefix' '--restart' '--runner' '--help'
+        '--readonly' '--trust' '--rc' '--color' '--maxlines' '--prefix' '--restart' '--runner' '--help'
     else
       _describe 'subcommand' subs
     fi

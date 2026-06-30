@@ -209,6 +209,42 @@ class TestColor(Base):
         self.assertNotIn("\033[", self.proc(">> echo hi")["context"])
 
 
+class TestTruncate(Base):
+    def _big(self, n):
+        # `seq N` prints 1..N, one per line — a cheap large output.
+        return "; ".join(["seq %d" % n])
+
+    def test_long_output_truncated_with_pointer(self):
+        self.write(allow=["seq"], maxLines=10, color=False)
+        r = self.proc("> seq 100", sid="trunc1")["block"]
+        self.assertIn("more line", r)          # truncation note present
+        self.assertIn("full output:", r)        # points at the file
+        self.assertNotIn("\n100", r)            # line 100 not shown inline
+        # …and the file has the whole thing.
+        path = _engine._output_path("trunc1")
+        with open(path) as f:
+            self.assertIn("100", f.read())
+
+    def test_short_output_not_truncated(self):
+        self.write(allow=["seq"], maxLines=40, color=False)
+        r = self.proc("> seq 5", sid="trunc2")["block"]
+        self.assertNotIn("more line", r)
+        self.assertIn("5", r)
+
+    def test_zero_disables_truncation(self):
+        self.write(allow=["seq"], maxLines=0, color=False)
+        r = self.proc("> seq 200", sid="trunc3")["block"]
+        self.assertNotIn("more line", r)
+        self.assertIn("200", r)
+
+    def test_pipe_truncates_and_flags_file(self):
+        self.write(allow=["seq"], maxLines=10)
+        r = self.proc(">> seq 100", sid="trunc4")
+        self.assertIn("context", r)
+        self.assertIn("truncated", r["context"])
+        self.assertNotIn("\n100", r["context"])
+
+
 class TestLeadingWhitespace(Base):
     def test_space_before_prefix_still_intercepts(self):
         self.write(readonly=True)
