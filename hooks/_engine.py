@@ -391,8 +391,26 @@ Safety: the allowlist is empty by default; a command runs only if you allow it.
 Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)"""
 
 
+SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
+               "prefix", "restart", "runner", "show", "help"}
+
+
+def normalize_argv(argv):
+    """Accept subcommand style (`mode shell`) as an alias for flag style
+    (`--mode shell`). For command-taking subcommands the remaining words are
+    joined, so `allow git status` works without quoting. `help` → help screen."""
+    if argv and not argv[0].startswith("-") and argv[0] in SUBCOMMANDS:
+        sub, rest = argv[0], argv[1:]
+        if sub == "help":
+            return []
+        if sub in ("allow", "unallow", "launch", "unlaunch") and rest:
+            return ["--" + sub, " ".join(rest)]
+        return ["--" + sub] + rest
+    return argv
+
+
 def main(argv=None):
-    args_list = sys.argv[1:] if argv is None else argv
+    args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
     if not args_list:
         print(help_text())
         return
@@ -412,7 +430,7 @@ def main(argv=None):
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
-    a = p.parse_args(argv)
+    a = p.parse_args(args_list)
 
     if a.restart:
         print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")

@@ -10,16 +10,27 @@ Anything else passes through to the model untouched.
 """
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _engine import process  # noqa: E402
+from _engine import process, SUBCOMMANDS  # noqa: E402
 
-TRIGGER = re.compile(r"^sethu($|\s+-)")  # bare `sethu`, or `sethu -<flag>`
 ENGINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_engine.py")
+
+
+def is_sethu_command(prompt):
+    """`sethu`, `sethu -<flag>`, or `sethu <subcommand> …` — but not natural
+    language like "sethu is great"."""
+    if prompt == "sethu":
+        return True
+    if not prompt.startswith("sethu "):
+        return False
+    rest = prompt[len("sethu "):].lstrip()
+    if not rest or rest[0] == "-":
+        return True
+    return rest.split()[0] in SUBCOMMANDS
 
 
 def _block(reason):
@@ -36,7 +47,7 @@ def main():
     prompt = (data.get("prompt") or "").strip()
 
     # `sethu …` → run the management CLI locally, block the model.
-    if TRIGGER.match(prompt):
+    if is_sethu_command(prompt):
         args = prompt[len("sethu"):].strip()
         try:
             argv = shlex.split(args)

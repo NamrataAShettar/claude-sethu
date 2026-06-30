@@ -1,0 +1,37 @@
+#compdef sethu
+# Zsh completion for the `sethu` CLI.
+# Install:  add this dir to fpath before compinit, e.g. in ~/.zshrc:
+#   fpath=(/path/to/claude-sethu/completions $fpath)
+#   autoload -U compinit && compinit
+
+_sethu() {
+  local -a subs
+  subs=(
+    'mode:set statefulness mode'
+    'allow:allow a command'
+    'unallow:remove a command from the allowlist'
+    'launch:open a command in a real terminal'
+    'unlaunch:remove a command from the launch list'
+    'readonly:auto-allow read-only commands'
+    'prefix:set the trigger prefix'
+    'restart:restart the persistent shell(s)'
+    'runner:show the current config'
+    'help:show help'
+  )
+  if (( CURRENT == 2 )); then
+    if [[ $words[2] == -* ]]; then
+      _values 'flag' \
+        '--mode' '--allow' '--unallow' '--launch' '--unlaunch' \
+        '--readonly' '--prefix' '--restart' '--runner' '--help'
+    else
+      _describe 'subcommand' subs
+    fi
+  elif (( CURRENT == 3 )); then
+    case $words[2] in
+      mode|--mode)         _values 'mode' stateless cwd shell ;;
+      readonly|--readonly) _values 'state' on off ;;
+    esac
+  fi
+}
+
+_sethu "$@"

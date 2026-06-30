@@ -157,6 +157,23 @@ class TestSocketPath(unittest.TestCase):
         self.assertLess(len(_engine._sock_path(sid)), 104)
 
 
+class TestNormalizeArgv(unittest.TestCase):
+    def test_subcommand_to_flag(self):
+        n = _engine.normalize_argv
+        self.assertEqual(n(["mode", "shell"]), ["--mode", "shell"])
+        self.assertEqual(n(["readonly", "on"]), ["--readonly", "on"])
+        self.assertEqual(n(["restart"]), ["--restart"])
+        self.assertEqual(n(["runner"]), ["--runner"])
+        self.assertEqual(n(["allow", "git", "status"]), ["--allow", "git status"])
+        self.assertEqual(n(["help"]), [])
+
+    def test_passthrough(self):
+        n = _engine.normalize_argv
+        self.assertEqual(n(["--mode", "shell"]), ["--mode", "shell"])  # already flags
+        self.assertEqual(n(["git", "log"]), ["git", "log"])            # not a subcommand
+        self.assertEqual(n([]), [])
+
+
 class TestConfig(Base):
     def test_defaults_when_missing(self):
         os.unlink(self.cfg)

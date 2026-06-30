@@ -1,6 +1,6 @@
 {
   "name": "sethu",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "सेतु (\"bridge\") — run commands from Claude Code's prompt box. `> cmd` runs an allowlisted command for free (model never sees it); `>> cmd` also pipes the output to Claude.",
   "author": {
     "name": "namrataashettar"

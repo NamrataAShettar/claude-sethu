@@ -31,6 +31,45 @@ On branch main …
 > Claude Code v2.1.186) makes Claude respond — that costs tokens. sethu blocks
 > the prompt entirely, so nothing reaches the model unless you ask with `>>`.
 
+## What is it good for?
+
+sethu shines whenever you want to run a command *near* Claude but don't need to
+spend tokens or clutter the conversation on it.
+
+- **Protect your context window.** Every command you run via `>` instead of
+  asking Claude keeps its output out of the context window — so Claude stays
+  sharp longer, auto-compaction triggers later, and big sessions stay cheaper.
+  Glance at `> git status`, `> git diff`, `> ls`, `> cat config.json` as often as
+  you like for free.
+- **Stretch your rate limits / spend.** On Pro/Max or metered API, the checks
+  you'd normally ask Claude to run (and pay for) become free. Handy mid-task when
+  you just want to *see* something.
+- **Decide what Claude pays attention to.** `> cmd` keeps the result private to
+  you; `>> cmd` deliberately feeds it into Claude's context when you *do* want it
+  to act on the output. You control the firehose.
+- **A persistent shell right in the chat** (`sethu --mode shell`). Activate a
+  venv, export env vars, `cd` into a subdir — then run a series of commands that
+  share that state, all without leaving the Claude window:
+  ```text
+  sethu --mode shell
+  > source .venv/bin/activate
+  > export API_ENV=staging
+  > cd services/api
+  >> pytest -q tests/smoke      # runs in that exact env, and Claude sees the result
+  ```
+- **Safe, guarded execution.** `sethu --readonly on` lets you run inspection
+  commands freely while refusing anything that writes or chains — good for cautious
+  use, demos, or shared machines. The allowlist is empty by default.
+- **No context-switching.** One window for the conversation *and* your quick
+  commands — no alt-tab to a terminal, useful especially in SSH'd or remote
+  Claude Code sessions where a spare shell isn't handy.
+- **A scratchpad.** `> date`, `> df -h`, `> echo $PATH`, `> cal` — quick lookups
+  without spawning anything.
+
+If you mostly want Claude to *act on* command output, plain `!` bang mode already
+covers that. sethu's edge is the **free, out-of-context `>`**, the **persistent
+shell**, and the **allowlist guardrails**.
+
 ## Install
 
 ```
@@ -45,6 +84,20 @@ Optional launchers so you can type `sethu …` and `quiet …` in a terminal too
 ln -s "$PWD/bin/sethu" /opt/homebrew/bin/sethu   # any dir on your PATH
 ln -s "$PWD/bin/quiet" /opt/homebrew/bin/quiet
 ```
+
+Tab-completion for the `sethu` terminal command (completes flags, subcommands,
+and mode/readonly values):
+
+```bash
+# zsh: add the completions dir to fpath before compinit in ~/.zshrc
+fpath=("$PWD/completions" $fpath); autoload -U compinit && compinit
+# bash: source it in ~/.bashrc
+echo "source $PWD/completions/sethu.bash" >> ~/.bashrc
+```
+
+(Tab-completion works in a real terminal only — Claude Code's prompt box can't
+autocomplete hook-intercepted commands. In the box, type bare `sethu` for the
+options menu.)
 
 ## `quiet` — shrink command output Claude pays for
 
@@ -118,7 +171,9 @@ clears it on demand for a fresh shell.
 
 Type these as normal messages in the prompt box (no `!`) — the hook intercepts
 `sethu …`, runs it locally, and blocks the model, so it's **free**. Bare `sethu`
-(or `sethu --help`) shows the options.
+(or `sethu --help`) shows the options. Both **flag** and **subcommand** styles
+work: `sethu --mode shell` ≡ `sethu mode shell`, `sethu --allow "git status"` ≡
+`sethu allow git status`.
 
 ```text
 sethu                     # show options / help
