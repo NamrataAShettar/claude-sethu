@@ -66,6 +66,46 @@ undocumented in the README beyond a mention. Decide whether to add a short
 "couldn't open". Decide whether to support `$TERMINAL`/`x-terminal-emulator` /
 common emulators, or leave Linux as tmux-only.
 
+## 7. Queued `> cmd` is consumed by the model (hook limitation)
+
+If you type `> cmd` while Claude is mid-turn, Claude Code QUEUES it and folds it
+into the running turn as more input — it does NOT re-submit it as a fresh prompt,
+so the `UserPromptSubmit` hook never fires and the model interprets it instead
+(observed live: a queued `>whoami` / `>cat ...` reached the model). This is a
+harness limitation a plugin can't fix — hooks only fire on turn-starting prompts.
+
+Key fact: once queued, the input is already in context — its tokens are spent no
+matter what; nothing can reclaim them. The only truly token-free paths are
+running `> cmd` when sethu is idle, or using a launched pane (a real shell that
+never routes through the model).
+
+- **Option A** — make the model recognize a stray leading `>` as "meant for
+  sethu, not me": don't act on it, just remind the user to re-run it now that
+  sethu's idle. Avoids misinterpretation; costs a negligible reminder. (This is a
+  CLAUDE.md / behavior instruction, not plugin code — the hook can't see it.)
+- **Option B** — document the launched-pane workflow (`sethu --launch zsh` → a
+  persistent iTerm pane, independent of Claude's turns) as THE way to use a shell
+  while Claude is busy, and otherwise leave queued lines alone.
+- **Option C** — both.
+- _Leaning:_ B is the real answer (a launched pane is genuinely independent and
+  token-free); A is a nice-to-have guard. Lean B, optionally + A.
+
+## 8. Refusals have no colored header / exit code
+
+A refused command ("`cat ech` isn't allowed", interactive guard, launch-couldn't-
+open) prints as plain text — no `[mode]` tag, no red, no exit code (nothing ran,
+so there's no status). User expected the refusal to read as red/error. Decide
+whether to give refusals a header like `[cwd] ✗ refused · $ <cmd>` in red (with a
+glyph cue), so they visually match real failures. Started, not shipped.
+
+## 9. Mid-session logout (NOT a sethu issue — investigate separately)
+
+User got logged out of Claude Code mid-session, `/login` fixed it instantly.
+Neither sethu nor yodha touches auth, so ruled out. Most likely a routine OAuth
+token-refresh hiccup (or a second device invalidating the token). Parked: if it
+recurs, ask the claude-code-guide agent what triggers re-auth and how to make the
+session stickier. Not a plugin change.
+
 ---
 
 ## Standing offers (separate from the above)
