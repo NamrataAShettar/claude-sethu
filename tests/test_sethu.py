@@ -141,6 +141,21 @@ class TestShellMode(Base):
         self._shutdown(sid)
         self.assertNotIn("gone", self.proc("> echo $BAR", sid=sid)["block"])
 
+    def test_real_uuid_session_id(self):
+        # Regression: a full-length UUID must not overflow the AF_UNIX path.
+        sid = "a253f39f-aecf-416f-b1f0-2702df515154"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", allow=["echo"])
+        r = self.proc("> echo runs_ok", sid=sid)
+        self.assertIn("runs_ok", r["block"])
+        self.assertNotIn("path too long", r["block"])
+
+
+class TestSocketPath(unittest.TestCase):
+    def test_under_limit_for_uuid(self):
+        sid = "a253f39f-aecf-416f-b1f0-2702df515154"
+        self.assertLess(len(_engine._sock_path(sid)), 104)
+
 
 class TestConfig(Base):
     def test_defaults_when_missing(self):

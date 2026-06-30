@@ -20,6 +20,7 @@ CLI (`sethu --allow ...`, `--mode ...`, `--runner`).
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
@@ -212,8 +213,14 @@ _PROTO = 2
 
 
 def _sock_path(sid):
-    safe = "".join(c for c in (sid or "default") if c.isalnum() or c in "-_")
-    return os.path.join(tempfile.gettempdir(), f"sethu-shell-{safe}-p{_PROTO}.sock")
+    # Hash the session id so the socket path stays short — AF_UNIX paths are
+    # capped (~104 bytes on macOS), and temp dirs + a UUID session id overflow.
+    h = hashlib.md5((sid or "default").encode()).hexdigest()[:12]
+    name = f"sethu-{h}-p{_PROTO}.sock"
+    path = os.path.join(tempfile.gettempdir(), name)
+    if len(path) > 100:  # leave margin under the limit
+        path = os.path.join("/tmp", name)
+    return path
 
 
 def kill_daemons():
