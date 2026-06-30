@@ -119,6 +119,39 @@ use it automatically, drop the ready-made snippet from
 > `> cmd` keeps *your* commands out of Claude's context entirely; `quiet` shrinks
 > *Claude's own* commands. Different levers, same goal: fewer tokens.
 
+## Long output & temp files
+
+Commands like `ps aux`, `ls -R`, or a noisy build can dump hundreds of lines. To
+keep that from flooding the chat (`>`) or burning tokens (`>>`), sethu caps the
+displayed output:
+
+- Output beyond **`maxLines`** (default **40**) is truncated inline, showing the
+  **first** `maxLines` lines (the useful header rows for `ps`/`ls`/etc.).
+- The **full** output is written to a per-session file and a note points at it:
+  `… 312 more lines truncated · full output: /…/sethu-out-<hash>.log`. Open that
+  file, or `sethu --launch "less <path>"` to scroll it in a real pane.
+- The `>>` (pipe-to-Claude) path truncates too, and tells Claude the rest is on
+  disk so it can read the file only if it actually needs more.
+- Tune or disable it: `sethu --maxlines 100`, or `sethu --maxlines 0` for
+  unlimited.
+
+This differs from [`quiet`](#quiet--shrink-command-output-claude-pays-for):
+`quiet` shrinks **Claude's own** commands and keeps the **tail** (results live at
+the end of a build); truncation caps **your** `>`/`>>` commands and keeps the
+**head** (the top of `ps aux` is what you want).
+
+**Storage stays bounded — files are cleaned up automatically:**
+
+- The saved-output file is **reused per session** (one `sethu-out-<hash>.log` per
+  session, overwritten each command) — a session never accumulates more than one.
+- On every sethu prompt, sethu **sweeps its own temp files** (saved output and
+  `--launch` scripts) older than **7 days**. Best-effort, and only on sethu
+  prompts — never on normal chat.
+- These live in the OS temp dir (`/var/folders/…/T` on macOS, `/tmp` on Linux),
+  which the OS also purges on its own schedule.
+- Persistent-shell **sockets** are left alone — the daemon manages those (removed
+  on exit / 30-min idle), so the sweep can't kill a live shell.
+
 ## Read-only mode — skip the per-command allowlisting
 
 Tired of allowing `ls`, `cat`, `pwd`, `git log` one by one? Turn on read-only
