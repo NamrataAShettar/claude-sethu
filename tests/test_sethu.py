@@ -264,6 +264,13 @@ class TestConfig(Base):
         self.assertEqual(cfg["mode"], "cwd")
         self.assertEqual(cfg["allow"], [])
         self.assertFalse(cfg["readonly"])
+        self.assertFalse(cfg["rc"])
+
+    def test_rc_roundtrips(self):
+        _engine.main(["--rc", "on"])
+        self.assertTrue(_engine.load_config()["rc"])
+        _engine.main(["--rc", "off"])
+        self.assertFalse(_engine.load_config()["rc"])
 
     def test_roundtrip(self):
         c = _engine.load_config()

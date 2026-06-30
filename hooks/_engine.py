@@ -31,7 +31,7 @@ import tempfile
 import time
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
-            "readonly": False, "trust": False}
+            "readonly": False, "trust": False, "rc": False}
 MODES = ("stateless", "cwd", "shell")
 
 
@@ -268,16 +268,18 @@ def _connect(sock):
     return s
 
 
-def _spawn_daemon(sock, cwd_hint):
+def _spawn_daemon(sock, cwd_hint, use_rc=False):
     shelld = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shelld.py")
+    shell = os.environ.get("SHELL", "/bin/bash")
     subprocess.Popen(
-        [sys.executable, shelld, sock, cwd_hint or os.path.expanduser("~")],
+        [sys.executable, shelld, sock, cwd_hint or os.path.expanduser("~"),
+         "1" if use_rc else "0", shell],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL, start_new_session=True,
     )
 
 
-def shell_run(sid, cmd, cwd_hint=None):
+def shell_run(sid, cmd, cwd_hint=None, use_rc=False):
     sock = _sock_path(sid)
     s = None
     try:
@@ -290,7 +292,7 @@ def shell_run(sid, cmd, cwd_hint=None):
                 os.unlink(sock)
             except OSError:
                 pass
-            _spawn_daemon(sock, cwd_hint)
+            _spawn_daemon(sock, cwd_hint, use_rc)
             for _ in range(80):
                 try:
                     s = _connect(sock)
@@ -388,7 +390,7 @@ def process(prompt, data):
                 f"then run `> {cmd}` (or just run it in your terminal)."}
 
     if mode == "shell":
-        out, code = shell_run(sid, cmd, cwd_hint=data.get("cwd"))
+        out, code = shell_run(sid, cmd, cwd_hint=data.get("cwd"), use_rc=cfg.get("rc"))
     elif mode == "stateless":
         out, code = run_capture(cmd, cwd=data.get("cwd"))
     else:  # cwd
@@ -423,6 +425,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --readonly on        auto-allow read-only commands (ls, cat, git log…)
   sethu --trust on           bypass the allowlist — run ANY command (footgun)
   sethu --mode {'|'.join(MODES)}
+  sethu --rc on              shell mode: source your shell rc (aliases/functions/env)
   sethu --restart            restart the persistent shell(s) (clear shell state)
   sethu --prefix ">"         change the trigger
   sethu --help               full flag reference
@@ -433,7 +436,7 @@ Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
-               "trust", "prefix", "restart", "runner", "show", "help"}
+               "trust", "rc", "prefix", "restart", "runner", "show", "help"}
 
 
 def normalize_argv(argv):
@@ -470,6 +473,8 @@ def main(argv=None):
                    help="auto-allow a curated set of read-only commands")
     p.add_argument("--trust", choices=["on", "off"],
                    help="bypass the allowlist — run ANY command (footgun)")
+    p.add_argument("--rc", choices=["on", "off"],
+                   help="in shell mode, source your shell rc (aliases/functions/env)")
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
@@ -477,6 +482,15 @@ def main(argv=None):
 
     if a.restart:
         print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
+        return
+    if a.rc:
+        cfg = load_config()
+        cfg["rc"] = (a.rc == "on")
+        save_config(cfg)
+        kill_daemons()  # restart so the new shell takes effect
+        extra = (" — your shell's aliases/functions/env now load in shell mode"
+                 if cfg["rc"] else "")
+        print(f"✔ rc: {a.rc} (shell restarted){extra}")
         return
 
     cfg = load_config()
@@ -538,6 +552,7 @@ def main(argv=None):
     if cfg.get("trust"):
         trust_disp = "set but OVERRIDDEN by readonly ⚠" if both else "ON ⚠ allowlist bypassed"
     print(f"  trust:    {trust_disp}")
+    print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (shell mode sources your shell rc)")
     if both:
         print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
               "Run `sethu --readonly on` or `sethu --trust off` to clean up.")

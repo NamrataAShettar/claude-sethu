@@ -175,17 +175,29 @@ remains the safer middle ground (inspection commands free, writes refused).
 
 `sethu --mode <mode>` picks how much state persists between commands:
 
-| Mode | `cd` persists | `export` / `source` / venv | How |
+| Mode | `cd` persists | `export`/`source`/venv | New shell per command? |
 | --- | --- | --- | --- |
-| `stateless` | ❌ | ❌ | each command is its own subprocess |
-| `cwd` (default) | ✅ | ❌ | a per-session working directory is tracked |
-| `shell` | ✅ | ✅ | a real persistent `bash` behind a PTY daemon |
+| `stateless` | ❌ | ❌ | **yes** — a fresh `bash -c` each time |
+| `cwd` (default) | ✅ | ❌ | **yes**, but the working dir is remembered in a temp file |
+| `shell` | ✅ | ✅ | **no** — one persistent `bash` (PTY daemon) is reused |
 
 In `shell` mode, one long-lived bash serves your commands over a Unix socket, so
 `cd`, environment variables, `source`, and virtualenvs all carry across
 commands — a genuine persistent shell. The daemon exits after 30 minutes idle.
 Switching modes (`sethu --mode …`) auto-restarts it, and `sethu --restart`
 clears it on demand for a fresh shell.
+
+**Your aliases / functions / env** are *not* loaded by default — sethu runs a
+clean `bash --norc` for predictability. To make `shell` mode load your shell rc
+(so your aliases, functions, and exported vars work):
+
+```
+sethu --rc on      # shell mode runs your $SHELL and sources its rc (~/.zshrc, ~/.bashrc)
+```
+
+It restarts the shell so the change takes effect. Off by default (sourcing an rc
+runs arbitrary startup code and is slower). The allowlist still applies — an
+alias `hi` runs only if `hi` is allowed (or trust is on).
 
 ## Manage it
 

@@ -67,11 +67,16 @@ def _run(master, cmd):
 def main():
     sock_path = sys.argv[1]
     start_cwd = sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~")
+    use_rc = len(sys.argv) > 3 and sys.argv[3] == "1"
+    shell = sys.argv[4] if len(sys.argv) > 4 else "/bin/bash"
 
     pid, master = pty.fork()
     if pid == 0:
         os.chdir(start_cwd if os.path.isdir(start_cwd) else os.path.expanduser("~"))
-        os.execvp("bash", ["bash", "--norc", "--noprofile"])
+        if use_rc:
+            os.execvp(shell, [os.path.basename(shell)])   # your shell; rc sourced below
+        else:
+            os.execvp("bash", ["bash", "--norc", "--noprofile"])
         os._exit(1)
 
     # Disable echo so the typed command isn't mirrored back into the output.
@@ -81,11 +86,24 @@ def main():
         termios.tcsetattr(master, termios.TCSANOW, attrs)
     except Exception:
         pass
+    # Optionally source your shell rc so aliases/functions/env are available.
+    if use_rc:
+        base = os.path.basename(shell)
+        if "zsh" in base:
+            os.write(master, b"source ~/.zshrc 2>/dev/null; "
+                             b"precmd() {}; PROMPT='' RPROMPT=''\n")
+        elif "bash" in base:
+            os.write(master, b"shopt -s expand_aliases 2>/dev/null; "
+                             b"source ~/.bashrc 2>/dev/null\n")
+        else:
+            os.write(master, b"source ~/.profile 2>/dev/null\n")
+
     # GIT_PAGER/PAGER=cat so git (log/branch/diff) and other paged commands don't
-    # launch `less` under the PTY and hang. NO_COLOR keeps output clean.
+    # launch `less` under the PTY and hang. NO_COLOR keeps output clean. Set
+    # AFTER sourcing rc so the rc can't re-enable a prompt/pager.
     os.write(master, b"export PS1='' PS2='' GIT_PAGER=cat PAGER=cat NO_COLOR=1 ; "
                      b"stty -echo 2>/dev/null\n")
-    _drain(master, 0.4)
+    _drain(master, 0.8 if use_rc else 0.4)
 
     try:
         os.unlink(sock_path)
