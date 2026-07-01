@@ -354,13 +354,6 @@ refused), the interactive guard, all three statefulness modes (including the
 persistent shell), the `>>` pipe, completion headers, and config round-trips.
 GitHub Actions runs them on every push and PR (`.github/workflows/ci.yml`).
 
-## Companion
-
-sethu (the bridge) is published at
-[claude-sethu](https://github.com/NamrataAShettar/claude-sethu).
-[claude-yodha](https://github.com/NamrataAShettar/claude-yodha) is the warrior —
-a status-line game for Claude Code. Different tools, same author.
-
 ## About Claude Code
 
 sethu is a plugin for **[Claude Code](https://claude.com/claude-code)**,
