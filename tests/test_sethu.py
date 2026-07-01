@@ -109,6 +109,30 @@ class TestSafety(Base):
         self.write(allow=["ls"])
         self.assertIn("isn't allowed", self.proc("> ls\nrm -rf x")["block"])
 
+    def test_quoted_metachars_are_allowed(self):
+        # A `;`/`|` INSIDE quotes is argument text, not a command chain, so an
+        # allowlisted interpreter with a `-c` one-liner is permitted.
+        self.write(allow=["python3", "echo"])
+        for c in ['python3 -c "import os; print(os.getpid())"',
+                  "python3 -c 'a; b; c'",
+                  'echo "a|b;c"']:
+            self.assertNotIn("isn't allowed", self.proc("> " + c)["block"], c)
+
+    def test_unquoted_ops_still_refused_with_interpreter(self):
+        # But a real unquoted chain after the interpreter is still refused.
+        self.write(allow=["python3"])
+        for c in ['python3 -c "print(1)" ; rm -rf x',
+                  "python3 -c \"print(1)\" | sh",
+                  'python3 script.py > /etc/passwd',
+                  'python3 -c "print(1)" && rm x']:
+            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+
+    def test_command_substitution_refused_even_quoted(self):
+        # $( ), ${ }, backticks expand even inside double quotes → always refused.
+        self.write(allow=["echo"])
+        for c in ['echo "$(rm -rf x)"', 'echo "${HOME}"', 'echo "`rm`"']:
+            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+
     def test_readonly_no_newline_injection(self):
         self.write(readonly=True)
         self.assertIn("isn't allowed", self.proc("> ls\nrm -rf x")["block"])

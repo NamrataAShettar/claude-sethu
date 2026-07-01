@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
@@ -183,19 +184,41 @@ def save_config(cfg):
 
 
 # ── allow / launch matching ───────────────────────────────────────────────────
-# Shell metacharacters that chain to *another* command (pipe, redirect, &&/;,
-# substitution, backtick). An allowlisted command may be followed by plain
-# arguments only — NOT a pipe/redirect to something unallowed. Without this,
-# allowing `ls` would also allow `ls | rm -rf x` via prefix matching.
-_ALLOW_META = re.compile(r"[;&|<>`\n\r]|\$\(")
+# An allowlisted command may be followed by plain arguments only — NOT a pipe,
+# redirect, or chain to something unallowed. Without this, allowing `ls` would
+# also allow `ls | rm -rf x` via prefix matching. The check is quote-aware, so a
+# metacharacter that is *inside quotes* — e.g. the `;` in
+# `python3 -c "import os; ..."` — is part of an argument, not a command chain,
+# and is allowed. Command substitution and newlines are rejected even inside
+# quotes, because bash still expands `$( )`, `${ }`, and backticks within "…".
+_SUBST_META = re.compile(r"\$\(|\$\{|`|\n|\r")
+_SHELL_OPS = set(";|&<>()")
+
+
+def _has_unquoted_ops(cmd):
+    """True if `cmd` contains a shell control operator (; | & < > and subshell
+    parens) *outside* quotes. Operators inside single/double quotes are literal
+    argument text and don't chain to another command."""
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=";|&<>()")
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return True  # unbalanced quotes → treat as unsafe (fail closed)
+    return any(tok and set(tok) <= _SHELL_OPS for tok in tokens)
+
+
+def _is_chain_unsafe(cmd):
+    return bool(_SUBST_META.search(cmd)) or _has_unquoted_ops(cmd)
 
 
 def _matches(cmd, entries):
     cmd = cmd.strip()
+    unsafe = _is_chain_unsafe(cmd)
     for e in entries:
         if cmd == e:
             return True
-        if cmd.startswith(e + " ") and not _ALLOW_META.search(cmd):
+        if cmd.startswith(e + " ") and not unsafe:
             return True
     return False
 

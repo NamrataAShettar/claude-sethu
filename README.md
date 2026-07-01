@@ -198,11 +198,15 @@ remains the safer middle ground (inspection commands free, writes refused).
   so `> rm -rf …` is refused unless explicitly allowed.
 - ⚠️ The runner executes in your shell and **bypasses Claude Code's permission
   prompts**, so keep the allowlist tight — treat it like shell aliases.
-- **Injection-hardened.** An allowlisted command may be followed by plain
-  arguments only — *not* a pipe, redirect, `;`/`&&`, command substitution,
-  backtick, or newline. So allowlisting `ls` does **not** permit
-  `> ls | grep x | rm -rf x` or `> ls; rm -rf ~`; they're refused. (For piping
-  between read-only commands, use `--readonly on`, which validates every stage.)
+- **Injection-hardened (quote-aware).** An allowlisted command may be followed by
+  plain arguments only — *not* an **unquoted** pipe, redirect, `;`/`&&`, subshell,
+  command substitution, backtick, or newline. So allowlisting `ls` does **not**
+  permit `> ls | grep x | rm -rf x` or `> ls; rm -rf ~`; they're refused. But a
+  metacharacter **inside quotes** is argument text, so `> python3 -c "import os;
+  print(1)"` is fine (the `;` is Python, not a shell chain). Command substitution
+  (`$( )`, `` ` ``, `${ }`) is refused **even inside double quotes**, since bash
+  still expands it there. (For piping between read-only commands, use
+  `--readonly on`, which validates every stage.)
 - Read-only mode allows only genuinely read-only programs and git subcommands
   (no `git config`/`stash`/`branch -d`, no `find -delete`, no redirection).
 - The persistent-shell socket is created `0600` (owner-only), and the daemon
