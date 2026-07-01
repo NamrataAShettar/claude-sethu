@@ -221,6 +221,15 @@ Interactive, full-screen programs (`vim`, `top`, `ssh`, a bare `python`/`node`
 REPL) can't run in the captured runner — it has no terminal, so they'd hang.
 sethu refuses them and points you at `sethu --launch "<cmd>"` (a real pane).
 
+> ⚠️ **A launched terminal is a plain shell — it does NOT share sethu's
+> allowlist, mode, or cwd.** `--launch` hands the command to your real terminal
+> (a tmux/iTerm split or a Terminal window), which runs it directly with no
+> sethu guardrails, no persistent-shell state, and starting from the terminal's
+> own working directory. It's an escape *out* of sethu into a normal shell — use
+> it for interactive/long-running programs, not as a safer runner. (A future
+> `sethu --console` could give a launched pane that *does* share sethu's config;
+> see the backlog.)
+
 But an **interpreter with a script is not interactive** — it runs and exits — so
 those *do* run captured. Allow the interpreter and go:
 

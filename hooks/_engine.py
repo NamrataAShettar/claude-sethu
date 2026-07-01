@@ -872,13 +872,15 @@ def main(argv=None):
         # "launch" is a verb — open it now, not just register it. From here on
         # `> <val>` opens a terminal too (that's what the launch list is for).
         status = launch_in_terminal(val)
+        note = ("  Note: the launched terminal is a plain shell — it does NOT "
+                "share sethu's allowlist / mode / cwd.")
         if status:
             print(f"✔ {status} — opened {val!r}. From now on `> {val}` opens a "
-                  f"terminal too.")
+                  f"terminal too.\n{note}")
         else:
             print(f"✔ added {val!r} to the launch list — `> {val}` will open it in a "
                   f"terminal. (Couldn't open one now — no tmux pane, and auto-open "
-                  f"is macOS/tmux only; run `{val}` in your terminal.)")
+                  f"is macOS/tmux only; run `{val}` in your terminal.)\n{note}")
     for field, key in (("unallow", "allow"), ("unlaunch", "launch")):
         val = getattr(a, field)
         if val:

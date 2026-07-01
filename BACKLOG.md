@@ -111,6 +111,31 @@ form / `--launch`; (b) a way to send a canned answer (e.g. `yes |` prefix
 support, though `|` is currently blocked outside readonly). Low priority — the
 `-y` flags and `--launch` cover it. Noting so it's a known limitation, not a bug.
 
+## 14. `sethu --console` — a launched pane that shares sethu's config
+
+Today `sethu --launch <shell>` opens a PLAIN shell — no allowlist, no mode, no
+cwd sharing, no guardrails (now warned in the README + launch message). It's an
+escape out of sethu. Idea: `sethu --console` opens a launched pane running a
+small sethu REPL that applies the SAME config (allowlist/readonly/mode/truncation
+/`|^=^|` header) and, ideally, the session's cwd — a persistent sethu surface
+that runs **in parallel** with Claude's work (the only genuine parallelism path,
+since the in-box hook can't fire mid-turn — see #7). Also relevant to the
+"execute queued `> cmd`" discussion: a console is the clean answer to "run sethu
+stuff while Claude is busy." Design open: how the REPL shares/reloads config,
+whether it tracks the Claude session cwd. Medium interest.
+
+## 15. Rescue queued `> cmd` that reaches the model (from #7 discussion)
+
+When a `> cmd` is typed while Claude is working, it's folded into the running
+turn and only the MODEL sees it (no hook fires — see #7). Option: a `sethu --run
+"<cmd>"` subcommand (runs through the same allowlist/mode/safety and prints the
+result) + a CLAUDE.md snippet telling Claude "if a user message is only a `> …`
+command, execute it via `sethu --run` instead of interpreting it." Effect: a
+queued command executes through sethu's safety model instead of being misread.
+Tradeoff (be explicit): NOT free (it's already in context) and NOT parallel — it
+runs as part of Claude's turn via the Bash tool. Solves "don't waste/​misread my
+queued command," not "run it free while Claude works" (that's #14). Parked.
+
 ## 13. `sethu …` management path forks a second python (perf, rare path)
 
 Benchmark (v0.8.2, 40 iters, median): non-sethu prompt **28.0ms** (baseline bare
