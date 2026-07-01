@@ -343,10 +343,27 @@ class TestSweep(unittest.TestCase):
         stale = now - _engine._TEMP_MAX_AGE - 1000
         os.utime(old, (stale, stale))
         os.utime(cmd, (stale, stale))
-        _engine._sweep_temp(now)
+        _engine._sweep_temp(now, force=True)   # bypass the once-an-hour throttle
         self.assertFalse(os.path.exists(old), "stale .log should be swept")
         self.assertFalse(os.path.exists(cmd), "stale .command should be swept")
         self.assertTrue(os.path.exists(fresh), "fresh file must be kept")
+
+    def test_sweep_throttled(self):
+        # A recent sentinel means the scan is skipped (no deletions) until it ages.
+        import tempfile as _tf
+        tmp = _tf.gettempdir()
+        sentinel = os.path.join(tmp, "sethu-swept")
+        old = os.path.join(tmp, "sethu-out-throttle01.log")
+        open(old, "w").close()
+        self.addCleanup(lambda: [os.path.exists(p) and os.unlink(p)
+                                 for p in (old, sentinel)])
+        now = os.path.getmtime(old) + 100
+        os.utime(old, (now - _engine._TEMP_MAX_AGE - 1000,) * 2)  # very stale
+        os.utime(sentinel, (now - 10, now - 10))                  # swept 10s ago
+        _engine._sweep_temp(now)                                  # throttled → skip
+        self.assertTrue(os.path.exists(old), "recent sweep must skip the scan")
+        _engine._sweep_temp(now, force=True)                      # forced → runs
+        self.assertFalse(os.path.exists(old))
 
 
 class TestLeadingWhitespace(Base):

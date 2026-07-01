@@ -105,20 +105,45 @@ def _output_path(sid):
 # opportunistic sweep removes them. Stops storage bloat across many sessions
 # without depending on the OS to purge the temp dir.
 _TEMP_MAX_AGE = 7 * 24 * 3600  # 7 days
+_SWEEP_EVERY = 3600            # at most once an hour — it's a 7-day GC, not urgent
 
 
-def _sweep_temp(now):
+def _sweep_temp(now, force=False):
     """Best-effort: delete sethu's leftover temp files older than _TEMP_MAX_AGE.
-    `now` is passed in (time.time()) so it's testable and side-effect-free here.
+    `now` is passed in (time.time()) so it's testable. Throttled to ~once an hour
+    via a sentinel file, since scanning the temp dir on every command is wasteful
+    for a 7-day GC (cost scales with temp-dir size, not sethu's file count).
     Sockets are left alone — the daemon manages their lifecycle."""
     tmp = tempfile.gettempdir()
-    for pat in ("sethu-out-*.log", "sethu-launch-*.command"):
-        for p in glob.glob(os.path.join(tmp, pat)):
-            try:
-                if now - os.path.getmtime(p) > _TEMP_MAX_AGE:
-                    os.unlink(p)
-            except OSError:
-                pass
+    sentinel = os.path.join(tmp, "sethu-swept")
+    if not force:
+        try:
+            if now - os.path.getmtime(sentinel) < _SWEEP_EVERY:
+                return  # swept recently — skip the directory scan
+        except OSError:
+            pass  # no sentinel yet → sweep now and create it
+    try:
+        os.utime(sentinel, (now, now))
+    except OSError:
+        try:
+            open(sentinel, "w").close()
+        except OSError:
+            pass
+    # One directory pass, matching both prefixes, instead of two glob() calls.
+    try:
+        entries = list(os.scandir(tmp))
+    except OSError:
+        return
+    for e in entries:
+        n = e.name
+        if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
+                (n.startswith("sethu-launch-") and n.endswith(".command"))):
+            continue
+        try:
+            if now - e.stat().st_mtime > _TEMP_MAX_AGE:
+                os.unlink(e.path)
+        except OSError:
+            pass
 
 
 def _truncate(out, sid, max_lines, on):
@@ -129,9 +154,12 @@ def _truncate(out, sid, max_lines, on):
     pipe-to-Claude path)."""
     if max_lines <= 0:
         return out, ""
-    lines = out.split("\n")
-    if len(lines) <= max_lines:
-        return out, ""
+    # Only split off the first max_lines (+1 to detect "there's more") instead of
+    # materializing every line — matters when `out` is huge (e.g. `> cat bigfile`).
+    head = out.split("\n", max_lines)
+    if len(head) <= max_lines:
+        return out, ""            # fewer lines than the cap → nothing to truncate
+    total = out.count("\n") + 1   # cheap C-level scan, no list of all lines
     path = _output_path(sid)
     try:
         # O_NOFOLLOW + O_CREAT: the path is predictable (md5 of the session id)
@@ -142,8 +170,8 @@ def _truncate(out, sid, max_lines, on):
             f.write(out)
     except Exception:
         path = None
-    hidden = len(lines) - max_lines
-    shown = "\n".join(lines[:max_lines])
+    hidden = total - max_lines
+    shown = "\n".join(head[:max_lines])
     where = (f"full output: {path}  (open it, or `sethu --launch \"less {path}\"`)"
              if path else "full output unavailable (couldn't write temp file)")
     note = f"… {hidden} more line{'s' if hidden != 1 else ''} truncated · {where}"

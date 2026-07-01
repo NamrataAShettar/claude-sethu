@@ -58,7 +58,10 @@ def _run(master, cmd):
     end = time.time() + CMD_TIMEOUT
     done = False
     while time.time() < end:
-        r, _, _ = select.select([master], [], [], 0.2)
+        # Short poll interval: select() returns immediately when output is ready,
+        # so this only bounds the worst-case slack when a command finishes right
+        # after an empty poll. 0.05s keeps that floor low at negligible CPU cost.
+        r, _, _ = select.select([master], [], [], 0.05)
         if r:
             try:
                 chunk = os.read(master, 65536)

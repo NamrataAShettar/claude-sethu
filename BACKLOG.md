@@ -111,6 +111,31 @@ form / `--launch`; (b) a way to send a canned answer (e.g. `yes |` prefix
 support, though `|` is currently blocked outside readonly). Low priority — the
 `-y` flags and `--launch` cover it. Noting so it's a known limitation, not a bug.
 
+## 11. Idle shell-daemon memory & orphan reaping (perf audit)
+
+Each `shell`-mode session spawns a persistent bash + python daemon (~7–14MB, 2
+procs, a PTY fd, a listening socket) that lingers up to `IDLE_TIMEOUT` = 30 min
+after last use. Across many short sessions these accumulate (audit saw daemons
+from different plugin versions coexisting). The v0.8.0 `kill_daemons` fix reaps
+them on `--restart`/`--mode`/`--rc`/`--timeout`, but nothing reaps on session
+end. Options (each a tradeoff, so parked): (a) lower `IDLE_TIMEOUT` to ~10 min —
+less lingering memory, but a returning user loses their venv/cd state sooner;
+(b) wire a **SessionEnd hook** that calls `kill_daemons()` (or kills just this
+session's socket) — the correct fix, promptly reaps, but adds a hook. Lean (b).
+Only affects shell mode; cwd/stateless have zero daemon cost.
+
+## 12. Unbounded output capture for a single command (perf audit)
+
+`run_capture` uses `subprocess.run(capture_output=True)`, buffering ALL of a
+command's stdout/stderr in memory before truncation runs — so `> cat hugefile`
+or `> find /` can transiently hold hundreds of MB even though only `maxLines` are
+shown. (`_truncate` was fixed in the perf pass to not also copy every line.)
+Fix idea: read from the child with a byte cap (e.g. stop at ~1–2 MB, mark
+truncated) instead of unbounded capture. Tradeoff: `>>` can't pipe output it
+didn't capture — but it's truncating to `maxLines` anyway, so acceptable. Parked
+because it needs switching run_capture from `subprocess.run` to a manual Popen
+read loop (more code, more timeout/interrupt handling). Medium priority.
+
 ## 9. Mid-session logout (NOT a sethu issue — investigate separately)
 
 User got logged out of Claude Code mid-session, `/login` fixed it instantly.
