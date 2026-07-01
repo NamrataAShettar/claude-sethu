@@ -1,6 +1,6 @@
 {
   "name": "sethu",
-  "description": "A bridge for running terminal commands from Claude Code's prompt box, for free.",
+  "description": "Run terminal commands from Claude Code's prompt box. Commands execute directly in your shell, bypassing Claude Code's per-command permission prompts — read-only by default; writing commands need an explicit allowlist.",
   "owner": {
     "name": "namrataashettar"
   },
@@ -8,7 +8,7 @@
     {
       "name": "sethu",
       "source": "./",
-      "description": "Run allowlisted commands from the prompt box: `> cmd` is free (blocks the model), `>> cmd` pipes output to Claude."
+      "description": "Run commands from the prompt box: `> cmd` runs it in your shell and blocks the model (zero tokens), `>> cmd` also pipes output to Claude. Executes WITHOUT Claude Code's per-command permission prompts — read-only by default; writes require `sethu --allow`."
     }
   ]
 }
