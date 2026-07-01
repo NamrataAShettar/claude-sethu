@@ -59,6 +59,27 @@ class TestReadonlyFn(unittest.TestCase):
                   "$(rm)", "ls `rm`", "ls & rm", "sed -i s/a/b/ f", "awk '{}' f"]:
             self.assertFalse(_engine.is_readonly_safe(c), c)
 
+    def test_no_exec_wrappers(self):
+        # env / command are generic launchers — must NOT be readonly-safe.
+        for c in ["env rm -rf x", "env FOO=1 sh -c id", "command rm -rf x",
+                  "command id"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_no_write_flags(self):
+        # Read-only programs that can write a file via an option are refused.
+        for c in ["sort -o /tmp/v f", "sort --output=/tmp/v f", "sort -o/tmp/v f",
+                  "xxd -r hex out", "date -s 2020-01-01",
+                  "git diff --output=/tmp/v", "git log --output=/tmp/v",
+                  "git show --output=/tmp/v HEAD",
+                  "find . -fls out", "find . -fprint0 out", "find . -okdir rm {} ;"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_write_flag_guard_no_overblock(self):
+        # …but legit read-only invocations of the same programs still pass.
+        for c in ["sort f", "sort -r f", "sort -n f", "xxd f", "date",
+                  "git diff", "git show HEAD", "find . -follow", "find . -name x"]:
+            self.assertTrue(_engine.is_readonly_safe(c), c)
+
 
 class TestInteractiveFn(unittest.TestCase):
     def test(self):

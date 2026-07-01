@@ -49,6 +49,15 @@ def cmd_timeout():
     except ValueError:
         return CMD_TIMEOUT
 
+
+def max_lines(cfg):
+    """maxLines from config, coerced safely — a malformed value (e.g. a string)
+    must not crash the hook, which would break every `>` prompt."""
+    try:
+        return int(cfg.get("maxLines", 40) or 0)
+    except (ValueError, TypeError):
+        return 40
+
 # ANSI colors for the result header. Colorblind-safe (blue/orange, not green/red)
 # per Okabe-Ito. Off via `sethu --color off` or the NO_COLOR env var. Only the
 # header is colored — the command's own output is left untouched.
@@ -115,7 +124,11 @@ def _truncate(out, sid, max_lines, on):
         return out, ""
     path = _output_path(sid)
     try:
-        with open(path, "w") as f:
+        # O_NOFOLLOW + O_CREAT: the path is predictable (md5 of the session id)
+        # in a shared temp dir, so refuse to follow a pre-planted symlink — that
+        # would let a same-user process redirect the write onto e.g. ~/.bashrc.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as f:
             f.write(out)
     except Exception:
         path = None
@@ -301,12 +314,29 @@ def is_interactive(cmd):
 # conservative on purpose — no sed/awk/xargs/tee (they can write or exec).
 READONLY = {
     "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "stat", "file",
-    "tree", "which", "type", "command", "date", "whoami", "id", "uname",
-    "hostname", "uptime", "df", "du", "ps", "env", "printenv", "grep", "egrep",
+    "tree", "which", "type", "date", "whoami", "id", "uname",
+    "hostname", "uptime", "df", "du", "ps", "printenv", "grep", "egrep",
     "fgrep", "rg", "ag", "cut", "sort", "uniq", "tr", "column", "jq", "yq",
     "basename", "dirname", "realpath", "readlink", "nl", "tac", "comm", "diff",
     "cmp", "shasum", "md5", "sha256sum", "cksum", "hexdump", "xxd", "strings",
     "cal", "look", "fold", "fmt", "rev", "find", "fd", "git",
+}
+# NB: `env` and `command` are intentionally NOT here — they are generic program
+# launchers (`env PROG …` / `command PROG …`) and would make readonly mode into
+# arbitrary code execution. Allowlist them explicitly if you really need them.
+
+# Read-only programs that gain WRITE/EXEC power through specific options. In
+# readonly mode these options are rejected so the mode can't be escaped through a
+# "read-only" program (e.g. `sort -o FILE` writes FILE; `xxd -r` writes binary).
+_RO_WRITE_FLAGS = {
+    "sort": ("-o", "--output"),
+    "xxd": ("-r",),
+    "date": ("-s", "--set"),
+}
+# find primaries that execute a command or write a file — refused in readonly.
+_FIND_WRITE_PRIMARIES = {
+    "-exec", "-execdir", "-ok", "-okdir", "-delete",
+    "-fprint", "-fprint0", "-fprintf", "-fls",
 }
 # Only unambiguously read-only git subcommands. Excluded: branch/tag/remote
 # (delete/create with flags), stash (mutates), config (writes with `key value`).
@@ -320,9 +350,22 @@ READONLY_GIT = {
 _DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
+def _flag_present(toks, flags):
+    """True if any token is one of `flags` (also matching `--flag=x` and a
+    combined short flag like `-oFILE`)."""
+    for t in toks[1:]:
+        for f in flags:
+            if t == f or t.startswith(f + "="):
+                return True
+            if len(f) == 2 and f[0] == "-" and t.startswith(f) and len(t) > 2:
+                return True  # combined short flag, e.g. -oFILE
+    return False
+
+
 def is_readonly_safe(cmd):
     """True only if `cmd` is a pipeline of read-only programs with no
-    redirection, chaining, command substitution, or backgrounding."""
+    redirection, chaining, command substitution, backgrounding, or a write/exec
+    option on an otherwise-read-only program."""
     if _DANGER.search(cmd):
         return False
     for seg in cmd.split("|"):
@@ -334,11 +377,15 @@ def is_readonly_safe(cmd):
             sub = toks[1] if len(toks) > 1 else ""
             if sub not in READONLY_GIT:
                 return False
+            # read-only subcommands can still write a file via --output=FILE.
+            if _flag_present(toks, ("--output",)):
+                return False
         elif prog == "find":
-            if any(t in ("-exec", "-execdir", "-delete", "-ok", "-fprint",
-                         "-fprintf") for t in toks):
+            if any(t in _FIND_WRITE_PRIMARIES for t in toks):
                 return False
         elif prog not in READONLY:
+            return False
+        elif prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
             return False
     return True
 
@@ -426,7 +473,10 @@ def launch_in_terminal(cmd):
             fd, path = tempfile.mkstemp(prefix="sethu-launch-", suffix=".command")
             with os.fdopen(fd, "w") as f:
                 f.write(f"#!/bin/bash\n{cmd}\nexec {shell} -l\n")
-            os.chmod(path, 0o755)
+            # 0700, not 0755 — the script holds the raw command (which may carry
+            # secrets) and `open` only needs owner-execute. Don't widen perms on a
+            # user-command file sitting in a shared temp dir.
+            os.chmod(path, 0o700)
             _run_quiet(["open", path])
             return "↗ opened in a new Terminal window"
         except Exception:
@@ -455,7 +505,10 @@ def kill_daemons():
     """Gracefully shut down all sethu shell daemons and remove their sockets.
     Each session respawns a fresh daemon on its next command. Returns the count."""
     n = 0
-    for sock in glob.glob(os.path.join(tempfile.gettempdir(), "sethu-shell-*.sock")):
+    # Must match the _sock_path template (sethu-<hash>-p<proto>.sock). The old
+    # "sethu-shell-*.sock" glob never matched, so --restart / mode-switch / --rc
+    # silently left live daemons running.
+    for sock in glob.glob(os.path.join(tempfile.gettempdir(), "sethu-*-p*.sock")):
         try:
             s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             s.settimeout(2)
@@ -640,7 +693,7 @@ def process(prompt, data):
 
     # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
     # The full text is written to a per-session file; the note points at it.
-    shown, note = _truncate(out, sid, int(cfg.get("maxLines", 40) or 0), on)
+    shown, note = _truncate(out, sid, max_lines(cfg), on)
 
     if pipe:
         ctx = f"Output of `{cmd}` ({status}):\n{shown}"
@@ -836,7 +889,7 @@ def main(argv=None):
     print(f"  trust:    {trust_disp}")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (colored result header)")
-    ml = int(cfg.get("maxLines", 40) or 0)
+    ml = max_lines(cfg)
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (truncate long output; full saved to a file)")
     if both:
         print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
