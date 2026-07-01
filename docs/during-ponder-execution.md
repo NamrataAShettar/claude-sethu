@@ -283,3 +283,161 @@ keystroke that runs a sethu command must originate above/beside Claude. This is 
 same conclusion as the wrapper section: the wrapper is the natural home for that
 keystroke (e.g. macOS Hammerspoon/skhd global hotkey, or a tmux popup keybind), with
 an optional file drop that a `Stop` hook bridges into Claude's next turn.
+
+---
+
+# Update — the official `monitors` primitive (confirmed) changes the picture
+
+The "background-monitor primitive" floated above as an *"any available resources
+upgrade"* is **real and documented**, not speculative:
+[plugins-reference § Monitors](https://code.claude.com/docs/en/plugins-reference.md#monitors)
+(Claude Code **v2.1.105+**).
+
+- A plugin declares monitors in `monitors/monitors.json` (or inline via
+  `experimental.monitors` in `plugin.json`). Each has `name`, `command`,
+  `description`, optional `when` (`"always"` | `"on-skill-invoke:<skill>"`).
+- Each monitor **runs a shell command for the lifetime of the session** and
+  **delivers every stdout line to Claude as a notification** — asynchronously,
+  *without* blocking or waiting on the turn queue. A `Notification` hook can react.
+- Same trust level as hooks, unsandboxed, interactive sessions only. Claude Code
+  **manages its lifecycle** (start at session/reload, stop at end).
+
+**What this overturns:** a plugin *can* run a process concurrently with the ponder
+and surface its output **during** generation (as notifications) — using an official,
+lifecycle-managed primitive, with none of the hand-rolled SessionStart-daemon +
+reaper + idempotency code. It does **not** overturn the permanent ceiling: a monitor
+still can't inject into the *in-flight* API request; its notifications land as
+context Claude sees going forward, not mid-stream in the current completion. And a
+monitor runs a **fixed** command — it isn't itself a way to type a *new* arbitrary
+command mid-ponder.
+
+### The clean, all-official architecture
+
+Combine three official primitives — no `/tmp` inbox daemon to hand-roll or harden:
+
+```
+monitors.json ──> monitor runs `sethu --serve` for the session (Claude-managed)
+                     │  reads jobs from sethu's existing Unix socket (0600)
+                     │  runs each through the allowlist, streams result to stdout
+                     │        └─► surfaces to Claude as a NOTIFICATION (mid-ponder)
+hotkey / tmux popup ─> `sethu --run "<cmd>"` drops a job on the socket (out-of-lane)
+Notification hook ──> optional: react to / format the monitor's output
+```
+
+- **Monitor** = the concurrent worker, lifecycle-managed by Claude Code (replaces
+  the SessionStart-daemon + Stop-reaper + idempotency lockfile entirely).
+- **Hotkey/popup** = the only mid-ponder *input* channel (still out-of-lane, per the
+  keystroke section).
+- **Notification hook** = optional reaction/formatting.
+
+# Connecting to sethu's existing codebase
+
+Three concrete ties the design notes above don't yet make — they collapse a lot of
+the proposed new build into "reuse what sethu already has, hardened":
+
+1. **The inbox daemon is already built and hardened — it's `hooks/_shelld.py`.**
+   The notes propose a new inbox/outbox FIFO in `~/.sethu/` and then a hardening
+   checklist (0700 dir, 0600 files, fail-closed perms, reaping, event-driven).
+   sethu's shell-mode daemon already *is* this: a per-session worker over a **Unix
+   socket created `0600` via umask, fail-closed if group/world-accessible
+   (`_perms_ok`), spawned/reaped by `_spawn_daemon`/`kill_daemons`, idle-timed-out**,
+   event-driven (`select`, not polling). Use the **socket** as the auth'd job
+   channel (add a per-session nonce), not a world-guessable `/tmp` file. Most of the
+   notes' "hardening if built anyway" list is done in-tree.
+
+2. **Everything should funnel through one guarded executor: `sethu --run "<cmd>"`.**
+   A single subcommand that runs a command through the SAME allowlist / readonly /
+   mode / truncation / `|^=^|` header logic (`_engine.process`/`run_capture`), and
+   prints the result. Then the tmux popup, the monitor worker, AND the "rescue a
+   queued `> cmd` that reached the model" idea all reuse **one safe code path**
+   instead of three ad-hoc executors. This is the missing shared primitive under
+   the file-drop bridge and Option A both.
+
+3. **Option A's popup as written bypasses sethu's guardrails — route it through
+   `sethu --run`.** The `bind-key … 'bash -c "$c"'` example runs commands with **no
+   allowlist, no mode, no readonly** — the exact "a launched terminal shares none of
+   sethu's guardrails" footgun sethu now warns about on every `--launch` (README,
+   v0.8.3). Change the popup body to `sethu --run "$c"` (or `sethu --serve` +
+   socket drop) so the parallel lane keeps sethu's safety model instead of
+   discarding it.
+
+**Net:** the honest build is smaller than the notes imply — an official `monitor`
+running `sethu --serve` (worker) + a `sethu --run` guarded executor (shared entry) +
+the existing `_shelld` socket (hardened channel) + a hotkey (out-of-lane input). No
+new daemon lifecycle, no `/tmp` inbox, no re-hardening. Still parked; captured so the
+implementation reuses what's already secure.
+
+# Option — monitor as the sethu daemon (recommended synthesis)
+
+Instead of sethu spawning and reaping its own shell daemon, **declare a monitor that
+runs `sethu --serve`** and let Claude Code own its lifecycle. This is the cleanest
+synthesis of everything above because a monitor solves *two* problems at once.
+
+### Why it's strong
+
+1. **Lifecycle is handed to Claude Code.** Today sethu hand-rolls the daemon's life:
+   lazy `_spawn_daemon`, `kill_daemons`, `IDLE_TIMEOUT`, plus the orphan-accumulation
+   problem (see the perf notes) and the class of bug that was the `kill_daemons` glob
+   mismatch. A manifest monitor is **started at session start, kept alive, killed at
+   session end** by Claude Code — the reaper, idempotency lockfile, and idle timer all
+   disappear.
+2. **The monitor's stdout is an official "bridge to Claude" — and it's mid-ponder.**
+   The earlier SessionStart-daemon design bridged results back via a hand-rolled
+   `Stop`-hook drain (turn-end only). A monitor's stdout becomes a **notification
+   delivered *during* generation**, so a `>>` job dropped mid-ponder → daemon runs it
+   → writes to stdout → Claude sees it concurrently. Official, and strictly better than
+   the Stop-drain.
+
+### The rule that makes it safe (and keeps `>` free)
+
+A monitor's stdout is **model-facing** — every line it prints costs tokens. So the
+daemon must route output by prefix, and **stay silent by default**:
+
+| Job | Daemon writes the result to… | Claude sees it? | Tokens |
+|---|---|---|---|
+| `> cmd` (free) | the **socket → a user pane/file**; **stdout stays SILENT** | ❌ no | **free** |
+| `>> cmd` (share) | its **stdout** → notification | ✅ yes | tokens (intended) |
+
+The freeness of `>` no longer comes from a hook block (there's no hook on the socket
+path) — it comes from the daemon **withholding output from stdout**. One slip (a
+banner, a stray error to stdout) leaks every "free" command to Claude, so: redirect
+ALL daemon logging/errors to a file, and treat stdout as a deliberate, `>>`-only
+channel.
+
+### Shape
+
+```
+monitors/monitors.json ─> monitor: `sethu --serve`   (Claude-managed lifecycle)
+                             ├─ listens on the existing _shelld socket (0600, nonce)
+                             ├─ `>  job` → run via allowlist → result to pane/file  (stdout SILENT → free)
+                             └─ `>> job` → run via allowlist → result to STDOUT → notification (tokens)
+hotkey / tmux popup ──────> drops a job on the socket                 (out-of-lane, works mid-ponder)
+```
+
+### Honest caveats
+
+- **It runs always.** A manifest monitor starts every session (a bash+python process
+  for *every* user, even those who never use shell mode) — vs. today's lazy spawn that
+  only runs when shell mode is actually used. Mitigation: gate it with
+  `when: "on-skill-invoke:<skill>"` so it only starts once the user opts into the
+  concurrent lane.
+- **Input during the ponder is still out-of-lane.** The monitor is the *worker*, not
+  the *trigger*; a new mid-ponder command still arrives via a hotkey/popup onto the
+  socket (per the keystroke section — no in-Claude path exists).
+- **Free output still needs a pane.** `> cmd`'s user-facing output can't be painted
+  into the Claude TUI (only notifications reach it, and those are model-facing), so it
+  needs a pane/file surface.
+- **Nonce-auth the socket.** An always-listening `sethu --serve` is an executor; any
+  local process could drop a job. The `_shelld` socket is already `0600`/fail-closed —
+  add a per-session nonce so only the user's hotkey/hook can enqueue.
+- **Requires Claude Code v2.1.105+** (monitors), and monitors run unsandboxed at hook
+  trust level.
+
+### What it replaces
+
+Monitor-as-daemon collapses **two** hand-rolled pieces into official primitives: the
+daemon **lifecycle** (Claude Code manages it) *and* the **bridge-to-Claude** channel
+(monitor stdout, mid-ponder, replacing the Stop-drain). The architecture reduces to:
+monitor `sethu --serve` + the hardened socket + a hotkey drop + a pane for free
+output — provided the daemon keeps stdout silent for `>` and speaks only for `>>`.
+Still design-only; nothing built.

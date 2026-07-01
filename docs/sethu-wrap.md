@@ -68,3 +68,9 @@ Residual, standard hygiene (handled): `~/.sethu/` is `0700` and `out.log` is `06
 - Opt-in `Stop`-hook bridge to feed a chosen result into Claude's next turn
   (costs tokens only when you opt in)
 - Optional desktop notifications on command completion
+- **Monitor-as-daemon alternative** — instead of (or alongside) this tmux
+  wrapper, declare a Claude Code `monitor` that runs a `sethu --serve` worker:
+  Claude Code owns the daemon's lifecycle, and the monitor's stdout becomes an
+  *official* mid-ponder bridge for `>>` jobs (while `>` jobs stay silent/free).
+  Design + caveats in
+  [`during-ponder-execution.md` → "Option — monitor as the sethu daemon"](during-ponder-execution.md).
