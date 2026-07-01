@@ -111,6 +111,18 @@ form / `--launch`; (b) a way to send a canned answer (e.g. `yes |` prefix
 support, though `|` is currently blocked outside readonly). Low priority — the
 `-y` flags and `--launch` cover it. Noting so it's a known limitation, not a bug.
 
+## 13. `sethu …` management path forks a second python (perf, rare path)
+
+Benchmark (v0.8.2, 40 iters, median): non-sethu prompt **28.0ms** (baseline bare
+python3 = 27.5ms — i.e. sethu adds ~0.5ms, effectively free ✅); `> echo hi`
+**39.2ms**; `sethu --runner` **71.2ms**. The management CLI is the outlier because
+`sethu_hook.py` shells out to a SECOND python (`subprocess.run([python, _engine.py,
+…])`) instead of calling the CLI in-process. Fix idea: import and call
+`_engine.main(argv)` in-process (capturing stdout) rather than forking — roughly
+halves the `sethu …` latency (~71ms → ~40ms). Low priority: `sethu …` is a rare,
+human-initiated management action, not the hot path. The every-prompt path is
+already ~free. Parked to revisit if the mgmt latency ever feels sluggish.
+
 ## 11. Idle shell-daemon memory & orphan reaping (perf audit)
 
 Each `shell`-mode session spawns a persistent bash + python daemon (~7–14MB, 2
