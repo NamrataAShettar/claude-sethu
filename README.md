@@ -15,6 +15,15 @@ intercepts it, runs it locally, and **blocks the prompt** — so the model never
 sees it and you spend **no tokens**. Use `>>` when you *want* Claude to see the
 output.
 
+> ⚠️ **Only works when Claude is idle.** The hook fires only on a prompt that
+> *starts* a turn. If you submit a `> cmd` **while Claude is still generating**
+> ("pondering"), Claude Code queues it and folds it into the running turn — the
+> hook never fires, so it is **not** run as a sethu command; the **model reads it
+> as a normal message** (and it costs tokens). So: send `> cmd` only when Claude
+> is idle. To run commands *while* Claude works, use a separate terminal /
+> `sethu --launch <shell>` (see [`docs/during-ponder-execution.md`](docs/during-ponder-execution.md)
+> for why, and the parallel-lane design).
+
 Each result starts with a status line showing the active **mode**, completion,
 exit code, and the command:
 
