@@ -241,3 +241,45 @@ Claude's next turn *if* the user wants Claude to see them.
 
 The wrapper is the honest answer to the whole thread: **to get parallelism, move up
 the stack — wrap Claude, don't plug into it.**
+
+## Keystroke triggers
+
+Question: can sethu be triggered by a keystroke instead of typing `>cmd`? Splits by
+lane.
+
+### In-Claude keybindings (`~/.claude/keybindings.json`) — dead end
+
+Verified against the keybindings docs: bindings map keys **only** to built-in UI
+actions (`chat:submit`, `app:interrupt`, navigation/toggles, etc.). They **cannot**:
+
+- run a shell command / subprocess
+- insert text, or insert-and-submit a predefined string (no `insertText` action)
+- trigger a slash command (built-in or plugin)
+- invoke a hook
+
+So there is no way to bind a key to fire sethu from inside Claude Code — not even a
+"type `>whoami` and submit" macro, since there is no insert-text action. And
+`chat:submit` queues behind the current turn like normal typing anyway. The
+in-Claude keystroke door is fully closed.
+
+### Out-of-lane keystroke — the only path (and it is concurrent)
+
+The terminal/OS layer is the sole trigger option, and it runs in parallel with the
+ponder:
+
+| Tool | Keystroke → | Mid-ponder? |
+|---|---|---|
+| tmux | `bind-key` → popup/pane runs command | yes |
+| skhd (macOS) | global hotkey → script | yes |
+| Hammerspoon (macOS) | `hs.hotkey.bind` → prompt + `hs.execute` | yes |
+| iTerm2 / wezterm / kitty | key → send-text / spawn / coprocess | yes |
+| Karabiner | key → shell script | yes |
+
+### Rule this confirms
+
+Claude Code exposes **no user-programmable trigger that runs code in its own lane** —
+not hooks-during-ponder, not client commands for plugins, not keybindings. Any
+keystroke that runs a sethu command must originate above/beside Claude. This is the
+same conclusion as the wrapper section: the wrapper is the natural home for that
+keystroke (e.g. macOS Hammerspoon/skhd global hotkey, or a tmux popup keybind), with
+an optional file drop that a `Stop` hook bridges into Claude's next turn.
