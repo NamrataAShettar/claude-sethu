@@ -235,10 +235,30 @@ INTERACTIVE = {
     "python", "python3", "node", "irb", "psql", "mysql", "sqlite3", "ipython",
 }
 
+# Interpreters/REPLs that are only interactive when launched *bare* (or `-i`).
+# With a script, `-c CODE`, or `-m MODULE` they run to completion and return, so
+# they're fine for the captured runner. `python script.py` is batch; `python` is
+# a REPL. `-i` forces the prompt open, so it stays interactive.
+_REPL = {"python", "python3", "node", "irb", "ipython"}
+
 
 def is_interactive(cmd):
     toks = cmd.split()
-    return bool(toks) and os.path.basename(toks[0]) in INTERACTIVE
+    if not toks:
+        return False
+    prog = os.path.basename(toks[0])
+    if prog in _REPL:
+        args = toks[1:]
+        if "-i" in args:
+            return True  # explicit interactive flag
+        # Any non-flag argument (a script path) or -c/-m means batch mode.
+        for i, a in enumerate(args):
+            if a in ("-c", "-m"):
+                return False
+            if not a.startswith("-"):
+                return False  # a script path → runs and exits
+        return True  # bare `python`, or only passive flags → REPL
+    return prog in INTERACTIVE
 
 
 # Read-only inspection programs auto-allowed when `readonly` mode is on. Kept

@@ -211,6 +211,28 @@ remains the safer middle ground (inspection commands free, writes refused).
 - `cd` is exempt from the allowlist (it runs nothing — just moves the working
   directory).
 
+## Running scripts vs. interactive programs
+
+Interactive, full-screen programs (`vim`, `top`, `ssh`, a bare `python`/`node`
+REPL) can't run in the captured runner — it has no terminal, so they'd hang.
+sethu refuses them and points you at `sethu --launch "<cmd>"` (a real pane).
+
+But an **interpreter with a script is not interactive** — it runs and exits — so
+those *do* run captured. Allow the interpreter and go:
+
+```
+sethu --allow python3
+> python3 build/report.py         # runs, output captured, zero tokens
+> python3 -c "print(2**10)"       # -c / -m are batch too
+> python3                          # bare REPL → refused, use --launch
+```
+
+sethu tells the two apart: `python`/`python3`/`node`/`ipython`/`irb` are treated
+as interactive **only** when launched bare or with `-i`; a script path, `-c`, or
+`-m` argument means batch mode. (A script that never exits — e.g.
+`python3 -m http.server` — will run until the 60s command timeout, like any
+long-running command; launch those instead.)
+
 ## Statefulness modes
 
 `sethu --mode <mode>` picks how much state persists between commands:

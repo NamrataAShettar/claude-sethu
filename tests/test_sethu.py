@@ -67,6 +67,19 @@ class TestInteractiveFn(unittest.TestCase):
         self.assertFalse(_engine.is_interactive("ls -la"))
         self.assertFalse(_engine.is_interactive(""))
 
+    def test_bare_repl_is_interactive(self):
+        for c in ["python", "python3", "node", "ipython", "irb",
+                  "python -i", "python -i script.py"]:
+            self.assertTrue(_engine.is_interactive(c), c)
+
+    def test_interpreter_with_script_is_batch(self):
+        # A script / -c / -m makes the interpreter run and exit — captureable.
+        for c in ["python script.py", "python3 app.py --flag x",
+                  'python -c "print(1)"', "python -m http.server",
+                  "node app.js", 'node -e "console.log(1)"',
+                  "python -u worker.py"]:
+            self.assertFalse(_engine.is_interactive(c), c)
+
 
 class TestSafety(Base):
     def test_not_allowed_refused(self):
@@ -145,6 +158,22 @@ class TestTrust(Base):
 
 
 class TestRunner(Base):
+    def test_batch_python_runs_when_allowed(self):
+        # End-to-end: allowlisted `python <script>` runs captured (not refused as
+        # interactive) — the refinement that lets scripts run in the runner.
+        self.write(allow=["python3"])
+        script = os.path.join(self.tmp, "s.py")
+        with open(script, "w") as f:
+            f.write("print('hi from script')")
+        r = self.proc("> python3 " + script)["block"]
+        self.assertNotIn("isn't allowed", r)
+        self.assertNotIn("interactive", r)
+        self.assertIn("hi from script", r)
+
+    def test_bare_python_still_refused_as_interactive(self):
+        self.write(allow=["python3"])
+        self.assertIn("interactive", self.proc("> python3")["block"])
+
     def test_explicit_allow_runs(self):
         self.write(allow=["echo"])
         r = self.proc("> echo hello")
