@@ -378,6 +378,33 @@ class TestShellMode(Base):
         self.assertNotIn("path too long", r["block"])
 
 
+class TestTimeout(Base):
+    def setUp(self):
+        super().setUp()
+        os.environ["SETHU_CMD_TIMEOUT"] = "2"   # keep the test quick
+
+    def tearDown(self):
+        os.environ.pop("SETHU_CMD_TIMEOUT", None)
+        super().tearDown()
+
+    def test_cwd_timeout_points_to_launch(self):
+        self.write(allow=["sleep"], color=False)
+        r = self.proc("> sleep 5")["block"]
+        self.assertIn("timed out (2s)", r)
+        self.assertIn("--launch", r)
+
+    def test_shell_timeout_reports_and_recovers(self):
+        sid = "test-timeout-shell"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", allow=["sleep", "echo"], color=False)
+        r = self.proc("> sleep 5", sid=sid)["block"]
+        self.assertIn("timed out (2s)", r)
+        # The shell must recover — the stuck command was interrupted, so the next
+        # command runs normally instead of hanging behind it.
+        r2 = self.proc("> echo alive", sid=sid)["block"]
+        self.assertIn("alive", r2)
+
+
 class TestSocketPerms(unittest.TestCase):
     def test_owner_only_is_ok(self):
         # 0600 socket (the umask result) is accepted.

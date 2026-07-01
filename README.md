@@ -229,9 +229,30 @@ sethu --allow python3
 
 sethu tells the two apart: `python`/`python3`/`node`/`ipython`/`irb` are treated
 as interactive **only** when launched bare or with `-i`; a script path, `-c`, or
-`-m` argument means batch mode. (A script that never exits — e.g.
-`python3 -m http.server` — will run until the 60s command timeout, like any
-long-running command; launch those instead.)
+`-m` argument means batch mode.
+
+### Command timeout
+
+A captured command is given **20 seconds** (kept under Claude Code's hook budget);
+past that sethu **stops waiting and tells you**, pointing at `--launch`:
+
+```text
+|^=^| [shell] ⚠ no exit code · $ python3 server.py
+timed out (20s). If it's interactive or waiting for input, open it in a
+terminal instead: sethu --launch "python3 server.py"
+```
+
+This covers two cases the captured runner can't handle:
+
+- **Long-running** commands (a server, `python3 -m http.server`, `tail -f`) —
+  they never return, so run them in a launched pane instead.
+- **Commands waiting for input** — in `cwd`/`stateless` mode stdin is closed, so
+  `input()` gets EOF and fails fast; in `shell` mode it would block, so sethu
+  times out, **interrupts it (Ctrl-C) so your persistent shell recovers**, and
+  points you at `--launch`.
+
+Raise or lower the limit with the `SETHU_CMD_TIMEOUT` environment variable (in
+seconds); the persistent-shell daemon picks it up too.
 
 ## Statefulness modes
 

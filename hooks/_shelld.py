@@ -22,7 +22,13 @@ import termios
 import time
 
 IDLE_TIMEOUT = 1800  # 30 minutes
-CMD_TIMEOUT = 60      # max seconds to wait for a command's output
+# Max seconds to wait for a command's output — mirrors _engine.CMD_TIMEOUT (kept
+# under Claude Code's UserPromptSubmit hook budget). Inherited SETHU_CMD_TIMEOUT
+# overrides it (the engine passes it through when spawning the daemon).
+try:
+    CMD_TIMEOUT = int(os.environ.get("SETHU_CMD_TIMEOUT") or 20)
+except ValueError:
+    CMD_TIMEOUT = 20
 
 
 def _perms_ok(mode):
@@ -50,6 +56,7 @@ def _run(master, cmd):
     os.write(master, ("printf '\\n%s %%s\\n' \"$?\"\n" % marker).encode("utf-8"))
     buf = ""
     end = time.time() + CMD_TIMEOUT
+    done = False
     while time.time() < end:
         r, _, _ = select.select([master], [], [], 0.2)
         if r:
@@ -61,7 +68,19 @@ def _run(master, cmd):
                 break
             buf += chunk.decode("utf-8", "replace")
             if marker in buf:
+                done = True
                 break
+    if not done:
+        # The command outran the timeout and is still executing (e.g. it's
+        # waiting on input, or long-running). Interrupt it so it doesn't wedge
+        # the persistent shell for the next command, then report a timeout.
+        try:
+            os.write(master, b"\x03")   # Ctrl-C to the running foreground command
+            _drain(master, 0.5)
+        except OSError:
+            pass
+        partial = buf.split(marker, 1)[0].strip()
+        return "TIMEOUT\n" + partial
     out = buf.split(marker, 1)[0].strip() or "(no output)"
     after = buf.split(marker, 1)[1] if marker in buf else ""
     m = re.search(r"-?\d+", after)

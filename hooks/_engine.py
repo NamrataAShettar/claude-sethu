@@ -35,6 +35,19 @@ DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
             "maxLines": 40}
 MODES = ("stateless", "cwd", "shell")
 
+# Max seconds a captured command may run before it's timed out and the user is
+# pointed at `--launch`. Kept safely under Claude Code's UserPromptSubmit hook
+# budget (~30s). Override with SETHU_CMD_TIMEOUT (the daemon inherits it too).
+# _shelld.py mirrors this — keep the two in sync.
+CMD_TIMEOUT = 20
+
+
+def cmd_timeout():
+    try:
+        return int(os.environ.get("SETHU_CMD_TIMEOUT") or CMD_TIMEOUT)
+    except ValueError:
+        return CMD_TIMEOUT
+
 # ANSI colors for the result header. Colorblind-safe (blue/orange, not green/red)
 # per Okabe-Ito. Off via `sethu --color off` or the NO_COLOR env var. Only the
 # header is colored — the command's own output is left untouched.
@@ -313,17 +326,18 @@ def run_capture(cmd, cwd=None):
     env = dict(os.environ, NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
     try:
         # stdin=DEVNULL so a program waiting on input gets EOF instead of
-        # hanging; timeout well under the 30s UserPromptSubmit hook limit.
+        # hanging; timeout kept under the UserPromptSubmit hook budget.
+        t = cmd_timeout()
         r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=20, env=env,
-            stdin=subprocess.DEVNULL,
+            cmd, shell=True, capture_output=True, text=True, timeout=t,
+            env=env, stdin=subprocess.DEVNULL,
             cwd=cwd if (cwd and os.path.isdir(cwd)) else None,
         )
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
         return (out.strip() or "(no output)", r.returncode)
     except subprocess.TimeoutExpired:
-        return ("timed out (20s). If it's interactive or long-running, open it in "
-                f"a terminal instead: sethu --launch \"{cmd}\"", None)
+        return (f"timed out ({cmd_timeout()}s). If it's interactive or long-running, "
+                f"open it in a terminal instead: sethu --launch \"{cmd}\"", None)
     except Exception as e:
         return (f"error: {e}", None)
 
@@ -482,9 +496,16 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False):
             if not chunk:
                 break
             data += chunk
-        # daemon replies "<exit_code>\n<output>"
+        # daemon replies "<exit_code>\n<output>", or "TIMEOUT\n<partial output>"
+        # when the command outran CMD_TIMEOUT (the daemon interrupts it so the
+        # shell recovers).
         text = data.decode("utf-8", "replace")
         first, _, rest = text.partition("\n")
+        if first.strip() == "TIMEOUT":
+            partial = (rest.strip() + "\n") if rest.strip() else ""
+            return (f"{partial}timed out ({cmd_timeout()}s). If it's interactive or "
+                    f"waiting for input, open it in a terminal instead: "
+                    f"sethu --launch \"{cmd}\"", None)
         if first.strip().lstrip("-").isdigit():
             return (rest.strip() or "(no output)", int(first))
         # No exit-code line (e.g. an older daemon) — show the whole reply rather
