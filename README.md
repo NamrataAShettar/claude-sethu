@@ -255,6 +255,18 @@ This covers two cases the captured runner can't handle:
   times out, **interrupts it (Ctrl-C) so your persistent shell recovers**, and
   points you at `--launch`.
 
+> **Interactive prompts can't be answered — even in `shell` mode.** Commands that
+> stop to ask a question (`npm install` resolving a conflict, `apt install`'s
+> *"Do you want to continue? [Y/n]"*, `pip`'s prompts, `brew`, `gh auth login`,
+> `git` credential prompts) have nowhere to send your keystrokes — the runner has
+> no interactive terminal. `shell` mode persists state, but it still can't *type
+> back* at a prompt. Two ways around it:
+> - **Pass the non-interactive flag** so it never asks: `apt-get install -y …`,
+>   `npm install --yes`, `pip install -q …`, `brew install … ` (no prompt),
+>   `DEBIAN_FRONTEND=noninteractive …`.
+> - **`sethu --launch "<cmd>"`** to run it in a real terminal where you *can*
+>   answer.
+
 Raise or lower the limit:
 
 ```

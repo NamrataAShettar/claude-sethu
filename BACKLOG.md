@@ -98,6 +98,19 @@ so there's no status). User expected the refusal to read as red/error. Decide
 whether to give refusals a header like `[cwd] ✗ refused · $ <cmd>` in red (with a
 glyph cue), so they visually match real failures. Started, not shipped.
 
+## 10. Interactive confirmation prompts can't be answered (fundamental)
+
+Commands that pause to ask a question (`npm install` conflict resolution, `apt
+install` "[Y/n]", `pip`, `brew`, `gh auth login`, git credential prompts) can't
+be answered — the captured runner has no interactive terminal, and even `shell`
+mode (which persists state) can't *type back* at a prompt. Documented in the
+README with workarounds (non-interactive flags like `-y`/`--yes`/`DEBIAN_FRONTEND
+=noninteractive`, or `--launch` into a real terminal). Possible future ideas, if
+worth it: (a) detect a likely-interactive installer and pre-suggest the `-y`
+form / `--launch`; (b) a way to send a canned answer (e.g. `yes |` prefix
+support, though `|` is currently blocked outside readonly). Low priority — the
+`-y` flags and `--launch` cover it. Noting so it's a known limitation, not a bug.
+
 ## 9. Mid-session logout (NOT a sethu issue — investigate separately)
 
 User got logged out of Claude Code mid-session, `/login` fixed it instantly.
