@@ -1,11 +1,13 @@
 {
   "name": "sethu",
   "displayName": "sethu सेतु — command bridge",
-  "version": "0.8.4",
-  "description": "सेतु (\"bridge\") — run commands from Claude Code's prompt box. `> cmd` runs an allowlisted command for free (model never sees it); `>> cmd` also pipes the output to Claude.",
+  "version": "0.8.5",
+  "description": "सेतु (\"bridge\") — run commands from Claude Code's prompt box. `> cmd` runs it for free (model never sees it; read-only commands work out of the box); `>> cmd` also pipes the output to Claude.",
   "author": {
     "name": "namrataashettar"
   },
+  "homepage": "https://github.com/NamrataAShettar/claude-sethu",
+  "repository": "https://github.com/NamrataAShettar/claude-sethu",
   "keywords": ["hook", "command", "runner", "terminal", "bridge", "tokens"],
   "license": "MIT"
 }

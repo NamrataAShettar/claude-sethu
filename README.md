@@ -81,10 +81,18 @@ If you mostly want Claude to *act on* command output, plain `!` bang mode alread
 covers that. sethu's edge is the **free, out-of-context `>`**, the **persistent
 shell**, and the **allowlist guardrails**.
 
+## Requirements
+
+- [Claude Code](https://claude.com/claude-code) (Anthropic's official CLI for Claude)
+- **`python3`** on your `PATH` — sethu is pure Python **standard library**, no `pip`
+  installs
+- **macOS or Linux** (Unix). The persistent `shell` mode (PTY daemon over a Unix
+  socket) and `--launch` (tmux/iTerm/Terminal) are Unix-only; native Windows is
+  not supported (WSL works). The plain `>`/`cwd`/`stateless` runner is portable.
+
 ## Install
 
-Requires [Claude Code](https://claude.com/claude-code) (Anthropic's official CLI
-for Claude). Inside a Claude Code session:
+Inside a Claude Code session:
 
 ```
 /plugin marketplace add NamrataAShettar/claude-sethu
