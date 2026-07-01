@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# sethu-run — popup helper for sethu-wrap.
+#
+# Reads ONE command line, runs it detached, and appends only its output to the
+# log. Zero-token by design: output goes to the log file, never into Claude's
+# context. Invoked by the tmux `display-popup` binding that sethu-wrap installs;
+# can also be run standalone.
+set -euo pipefail
+
+LOG_DIR="${SETHU_WRAP_DIR:-$HOME/.sethu}"
+LOG="$LOG_DIR/out.log"
+
+# Hygiene: private dir + log (output may contain secrets). Best-effort chmod.
+mkdir -p "$LOG_DIR"
+chmod 700 "$LOG_DIR" 2>/dev/null || true
+touch "$LOG"
+chmod 600 "$LOG" 2>/dev/null || true
+
+# One interactive line, with readline editing. Empty / EOF -> do nothing.
+read -r -e -p "sethu › " cmd || exit 0
+[ -n "${cmd:-}" ] || exit 0
+
+ts="$(date '+%H:%M:%S')"
+printf '\n[%s] $ %s\n' "$ts" "$cmd" >> "$LOG"
+
+# Detached so it survives the popup closing and never blocks. nohup (not setsid)
+# for macOS/Linux portability. stdin from /dev/null so it can't steal the tty.
+nohup bash -lc "$cmd" >> "$LOG" 2>&1 </dev/null &
+disown 2>/dev/null || true
+
+echo "↪ launched (pid $!). Output → $LOG"
+sleep 0.6

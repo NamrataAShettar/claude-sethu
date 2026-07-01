@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# sethu-wrap — run Claude Code with a parallel, zero-token command lane.
+#
+# Launches `claude` inside a tmux session and binds a key to a popup where you
+# can type a shell command. The command runs in a SEPARATE process, so it
+# executes concurrently with whatever Claude is doing ("during the ponder"), and
+# its output goes to a log file / tail pane — never into Claude's context, so it
+# costs zero tokens.
+#
+# Why tmux: it is terminal-agnostic (runs identically in iTerm2, Terminal.app,
+# Alacritty, kitty, wezterm, gnome-terminal, ...) and works on macOS + Linux +
+# Windows-via-WSL. Native Windows console is not supported by tmux; that path is
+# a future PTY-proxy wrapper (see docs/during-ponder-execution.md).
+#
+# Env overrides:
+#   SETHU_WRAP_SESSION  tmux session name        (default: sethu)
+#   SETHU_CLAUDE_BIN    claude binary            (default: claude)
+#   SETHU_WRAP_DIR      log/output dir           (default: ~/.sethu)
+#   SETHU_WRAP_KEY      popup keybinding         (default: M-g  = Alt-g)
+#   SETHU_WRAP_TAIL     1=show log tail pane     (default: 1)
+set -euo pipefail
+
+SESSION="${SETHU_WRAP_SESSION:-sethu}"
+CLAUDE_BIN="${SETHU_CLAUDE_BIN:-claude}"
+LOG_DIR="${SETHU_WRAP_DIR:-$HOME/.sethu}"
+LOG="$LOG_DIR/out.log"
+KEY="${SETHU_WRAP_KEY:-M-g}"
+SELFDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUN="$SELFDIR/sethu-run"
+
+# --- preflight ------------------------------------------------------------
+command -v tmux >/dev/null 2>&1 || {
+  echo "sethu-wrap: tmux not found. Install tmux >= 3.2 (macOS: brew install tmux)." >&2
+  exit 1
+}
+ver="$(tmux -V | sed 's/[^0-9.]*//g')"
+awk -v v="$ver" 'BEGIN{n=split(v,a,"."); if (a[1]<3 || (a[1]==3 && a[2]<2)) exit 1}' || {
+  echo "sethu-wrap: tmux $ver found; display-popup needs >= 3.2." >&2
+  exit 1
+}
+command -v "$CLAUDE_BIN" >/dev/null 2>&1 || {
+  echo "sethu-wrap: '$CLAUDE_BIN' not on PATH (set SETHU_CLAUDE_BIN)." >&2
+  exit 1
+}
+[ -x "$RUN" ] || {
+  echo "sethu-wrap: helper not executable: $RUN" >&2
+  exit 1
+}
+
+mkdir -p "$LOG_DIR"
+chmod 700 "$LOG_DIR" 2>/dev/null || true
+touch "$LOG"
+chmod 600 "$LOG" 2>/dev/null || true
+
+# --- session -------------------------------------------------------------
+if ! tmux has-session -t "$SESSION" 2>/dev/null; then
+  tmux new-session -d -s "$SESSION" -n main "$CLAUDE_BIN"
+fi
+
+# Popup keybinding (root/no-prefix). Pass the log dir through to the helper.
+tmux bind-key -n "$KEY" display-popup -E -w 80% -h 40% \
+  "SETHU_WRAP_DIR='$LOG_DIR' '$RUN'"
+
+# Optional live log tail in a small bottom pane, then refocus Claude.
+if [ "${SETHU_WRAP_TAIL:-1}" = "1" ]; then
+  if [ "$(tmux list-panes -t "$SESSION:main" 2>/dev/null | wc -l)" -lt 2 ]; then
+    tmux split-window -t "$SESSION:main" -v -l 20% "tail -n 100 -f '$LOG'" 2>/dev/null || true
+    tmux select-pane -t "$SESSION:main.0" 2>/dev/null || true
+  fi
+fi
+
+echo "sethu-wrap: session '$SESSION' ready."
+echo "  • Press ${KEY} for the command popup (runs concurrently, zero tokens)."
+echo "  • Output → $LOG"
+exec tmux attach -t "$SESSION"
