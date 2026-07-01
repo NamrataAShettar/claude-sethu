@@ -563,9 +563,15 @@ class TestConfig(Base):
         cfg = _engine.load_config()
         self.assertEqual(cfg["mode"], "cwd")
         self.assertEqual(cfg["allow"], [])
-        self.assertFalse(cfg["readonly"])
+        self.assertTrue(cfg["readonly"])   # read-only mode is ON by default
         self.assertFalse(cfg["rc"])
         self.assertTrue(cfg["color"])
+
+    def test_readonly_default_allows_inspection_refuses_writes(self):
+        # With no config at all, read-only commands run and writes are refused.
+        os.unlink(self.cfg)
+        self.assertNotIn("isn't allowed", self.proc("> ls")["block"])
+        self.assertIn("isn't allowed", self.proc("> rm -rf /tmp/x")["block"])
 
     def test_rc_roundtrips(self):
         _engine.main(["--rc", "on"])

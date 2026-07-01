@@ -6,7 +6,8 @@ hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
 API tokens (the model never sees it). `>>` instead pipes the output into
 Claude's context so it can act on the result.
 
-Safety: commands run only if they're on your allowlist (empty by default).
+Safety: read-only mode is ON by default — inspection commands run, writes/chaining
+are refused. Writing commands run only once added to the allowlist (`--allow`).
 `cd` is exempt (it just moves the working directory, runs nothing).
 
 Statefulness has three selectable modes (`sethu --mode <mode>`):
@@ -32,7 +33,7 @@ import tempfile
 import time
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
-            "readonly": False, "trust": False, "rc": False, "color": True,
+            "readonly": True, "trust": False, "rc": False, "color": True,
             "maxLines": 40, "timeout": 20}
 MODES = ("stateless", "cwd", "shell")
 
@@ -190,8 +191,9 @@ def _welcome_marker():
 FIRST_RUN_HINT = (
     f"{ICON} sethu is installed — run terminal commands free from this box. "
     "`> git status` shows output to you only (zero tokens); `>> git status` "
-    "sends it to Claude. Nothing runs until you allow it — try "
-    "`sethu --readonly on`, then type `sethu` for a \"when to use what\" guide."
+    "sends it to Claude. Read-only commands (ls, cat, git log…) work out of the "
+    "box; `sethu --allow \"<cmd>\"` to permit a writing command. Type `sethu` for "
+    "a \"when to use what\" guide."
 )
 
 
@@ -766,10 +768,10 @@ In the prompt (no `!` needed — costs zero tokens):
 When to use what:
   > cmd                 just inspect something yourself — free, stays out of context
   >> cmd                you want Claude to act on the output (costs tokens)
+  --allow "<cmd>"       permit a writing/other command (read-only ones already work)
   --launch  <cmd>       the command is interactive (vim, top, ssh) — pop a real terminal
-  --readonly on         tired of allowing ls / cat / git log one by one
   --mode shell          you need cd / export / venv to persist across commands
-  --trust on            you want > to run anything, no allowlist (footgun)
+  --trust on            you want > to run anything, no guardrails (footgun)
 
 Manage it (type `sethu …` in the prompt or a terminal):
   sethu                      show this help
@@ -788,8 +790,10 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --help               full flag reference
 
 Modes: stateless (no state) · cwd (cd persists — default) · shell (cd/export/venv persist)
-Safety: the allowlist is empty by default; a command runs only if you allow it.
-Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)"""
+Safety: read-only mode is ON by default — inspection commands (ls, cat, git log…)
+  run; writes/chaining are refused. `--allow` adds specific commands; `--readonly
+  off` turns the auto-allow off; `--trust on` removes all guardrails (footgun).
+Config: {config_path()}   (now: mode={cfg['mode']}, readonly={'on' if cfg.get('readonly') else 'off'}, {len(cfg['allow'])} allowed)"""
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",

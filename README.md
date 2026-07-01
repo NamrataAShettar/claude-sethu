@@ -5,9 +5,9 @@ Claude Code's prompt box, for free. Its mark — `|^=^|` — a little suspension
 bridge, and it prefixes every result so you can tell sethu's output at a glance.
 
 ```text
-sethu --allow "git status"      # allow a command (safe by default — allowlist is empty)
-> git status                    # run it locally, block the model → ZERO tokens, output shown to you
+> git status                    # read-only? runs out of the box → ZERO tokens, output shown to you
 >> git status                   # run it AND send the output to Claude (costs tokens, on purpose)
+sethu --allow "npm test"        # permit a writing/other command (read-only ones already work)
 ```
 
 Type a command prefixed with `>` as a normal message. A `UserPromptSubmit` hook
@@ -58,9 +58,10 @@ spend tokens or clutter the conversation on it.
   > cd services/api
   >> pytest -q tests/smoke      # runs in that exact env, and Claude sees the result
   ```
-- **Safe, guarded execution.** `sethu --readonly on` lets you run inspection
-  commands freely while refusing anything that writes or chains — good for cautious
-  use, demos, or shared machines. The allowlist is empty by default.
+- **Safe, guarded execution.** Read-only mode is **on by default**, so inspection
+  commands run freely while anything that writes or chains is refused — good for
+  cautious use, demos, or shared machines. `--allow` adds writing commands;
+  `--readonly off` reverts to allow-nothing-until-listed.
 - **No context-switching.** One window for the conversation *and* your quick
   commands — no alt-tab to a terminal, useful especially in SSH'd or remote
   Claude Code sessions where a spare shell isn't handy.
@@ -156,13 +157,12 @@ the end of a build); truncation caps **your** `>`/`>>` commands and keeps the
 - Persistent-shell **sockets** are left alone — the daemon manages those (removed
   on exit / 30-min idle), so the sweep can't kill a live shell.
 
-## Read-only mode — skip the per-command allowlisting
+## Read-only mode — ON by default
 
-Tired of allowing `ls`, `cat`, `pwd`, `git log` one by one? Turn on read-only
-mode and a curated set of **inspection** commands is auto-allowed:
+Read-only mode is **on out of the box**, so a curated set of **inspection**
+commands just works — no per-command allowlisting to get started:
 
 ```
-sethu --readonly on
 > ls
 > git log --oneline -5
 > cat README.md | head        # pipelines of read-only programs are fine
@@ -171,9 +171,14 @@ sethu --readonly on
 It's deliberately strict so it stays safe — a command is auto-allowed only if it
 is a pipeline of known read-only programs (ls, cat, head, grep, find, read-only
 `git` subcommands, …) with **no** redirection (`>`), chaining (`;`, `&&`),
-command substitution (`` ` ``, `$()`), or backgrounding. So `> ls; rm -rf ~`,
-`> echo x > f`, `> cat f | sh`, `> git push`, and `> find . -delete` are all
-**refused**. Your explicit `--allow` entries still work on top.
+command substitution (`` ` ``, `$()`), backgrounding, or a write/exec flag
+(`sort -o`, `git --output`, `xxd -r`, `find -delete/-exec`). So `> ls; rm -rf ~`,
+`> echo x > f`, `> cat f | sh`, `> git push`, `> env rm …`, and `> find . -delete`
+are all **refused**. Your explicit `--allow` entries work on top for anything that
+writes (`> sethu --allow "npm test"`).
+
+Turn the auto-allow off with `sethu --readonly off` (then nothing runs until you
+`--allow` it); `sethu --trust on` removes all guardrails (footgun).
 
 ## Trust mode (opt-in footgun)
 
@@ -192,10 +197,13 @@ remains the safer middle ground (inspection commands free, writes refused).
 
 ## Safety
 
-- The **allowlist is empty by default** — nothing runs until you `sethu --allow "<cmd>"`
-  (or turn on read-only mode, or — at your own risk — trust mode).
-- A command runs only if it matches an allow entry exactly or as `"<entry> …"`,
-  so `> rm -rf …` is refused unless explicitly allowed.
+- **Read-only mode is ON by default** — inspection commands (ls, cat, git log…)
+  run out of the box; anything that writes/chains/execs is refused. The `--allow`
+  list is empty by default, so any *writing* command runs only once you
+  `sethu --allow "<cmd>"` it (or — at your own risk — turn on trust mode). Turn the
+  auto-allow off with `sethu --readonly off` for allow-nothing-until-listed.
+- A writing command runs only if it matches an allow entry exactly or as
+  `"<entry> …"`, so `> rm -rf …` is refused unless explicitly allowed.
 - ⚠️ The runner executes in your shell and **bypasses Claude Code's permission
   prompts**, so keep the allowlist tight — treat it like shell aliases.
 - **Injection-hardened (quote-aware).** An allowlisted command may be followed by
@@ -327,7 +335,7 @@ work: `sethu --mode shell` ≡ `sethu mode shell`, `sethu --allow "git status"` 
 sethu                     # show options / help
 sethu --allow "<cmd>"     sethu --unallow "<cmd>"
 sethu --launch "<cmd>"    sethu --unlaunch "<cmd>"   # open <cmd> in a pane/window now
-sethu --readonly on       sethu --mode shell        sethu --prefix ">"
+sethu --readonly off      sethu --mode shell        sethu --prefix ">"   # read-only is ON by default
 sethu --color off         # plain result header (colorblind-safe by default; NO_COLOR also disables)
 sethu --maxlines 40       # cap long output (e.g. ps aux); full output saved to a file (0 = unlimited)
                           # (saved-output + launch temp files are auto-deleted after 7 days)
@@ -338,7 +346,7 @@ sethu --runner            # show the current config (~/.claude/sethu.json)
 Config lives in `~/.claude/sethu.json`:
 
 ```json
-{ "prefix": ">", "mode": "cwd", "allow": ["git status", "ls"], "launch": [] }
+{ "prefix": ">", "mode": "cwd", "readonly": true, "allow": ["npm test"], "launch": [] }
 ```
 
 ## Tests
