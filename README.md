@@ -255,8 +255,16 @@ This covers two cases the captured runner can't handle:
   times out, **interrupts it (Ctrl-C) so your persistent shell recovers**, and
   points you at `--launch`.
 
-Raise or lower the limit with the `SETHU_CMD_TIMEOUT` environment variable (in
-seconds); the persistent-shell daemon picks it up too.
+Raise or lower the limit:
+
+```
+sethu --timeout 60      # give commands up to 60s (restarts shell-mode daemons)
+```
+
+(The `SETHU_CMD_TIMEOUT` environment variable overrides the config value if set.)
+Note that Claude Code's `UserPromptSubmit` hook has its own budget (~30s), so a
+`--timeout` much above that may be cut off by the harness before sethu's own
+timeout fires — for genuinely long-running commands, use `--launch` instead.
 
 ## Statefulness modes
 

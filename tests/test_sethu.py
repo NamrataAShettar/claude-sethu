@@ -438,6 +438,26 @@ class TestTimeout(Base):
         self.assertIn("timed out (2s)", r)
         self.assertIn("--launch", r)
 
+    def test_config_timeout_used(self):
+        # With the env override cleared, the config `timeout` drives it.
+        os.environ.pop("SETHU_CMD_TIMEOUT", None)
+        self.write(allow=["sleep"], timeout=1, color=False)
+        cfg = _engine.load_config()
+        self.assertEqual(_engine.cmd_timeout(cfg), 1)
+        r = self.proc("> sleep 5")["block"]
+        self.assertIn("timed out (1s)", r)
+
+    def test_env_overrides_config_timeout(self):
+        self.write(timeout=99)
+        os.environ["SETHU_CMD_TIMEOUT"] = "3"
+        self.assertEqual(_engine.cmd_timeout(_engine.load_config()), 3)
+
+    def test_timeout_roundtrips_and_floors_at_1(self):
+        _engine.main(["--timeout", "45"])
+        self.assertEqual(_engine.load_config()["timeout"], 45)
+        _engine.main(["--timeout", "0"])
+        self.assertEqual(_engine.load_config()["timeout"], 1)  # floored
+
     def test_shell_timeout_reports_and_recovers(self):
         sid = "test-timeout-shell"
         self.addCleanup(self._shutdown, sid)

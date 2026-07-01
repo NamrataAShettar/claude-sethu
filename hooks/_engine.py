@@ -33,7 +33,7 @@ import time
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
             "readonly": False, "trust": False, "rc": False, "color": True,
-            "maxLines": 40}
+            "maxLines": 40, "timeout": 20}
 MODES = ("stateless", "cwd", "shell")
 
 # Max seconds a captured command may run before it's timed out and the user is
@@ -43,11 +43,21 @@ MODES = ("stateless", "cwd", "shell")
 CMD_TIMEOUT = 20
 
 
-def cmd_timeout():
-    try:
-        return int(os.environ.get("SETHU_CMD_TIMEOUT") or CMD_TIMEOUT)
-    except ValueError:
-        return CMD_TIMEOUT
+def cmd_timeout(cfg=None):
+    """Resolved command timeout in seconds: the SETHU_CMD_TIMEOUT env var wins,
+    then the config `timeout`, then the default. Always at least 1s."""
+    env = os.environ.get("SETHU_CMD_TIMEOUT")
+    if env:
+        try:
+            return max(1, int(env))
+        except ValueError:
+            pass
+    if cfg is not None:
+        try:
+            return max(1, int(cfg.get("timeout") or CMD_TIMEOUT))
+        except (ValueError, TypeError):
+            pass
+    return CMD_TIMEOUT
 
 
 def max_lines(cfg):
@@ -390,14 +400,14 @@ def is_readonly_safe(cmd):
     return True
 
 
-def run_capture(cmd, cwd=None):
+def run_capture(cmd, cwd=None, timeout=None):
     """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error."""
     # GIT_PAGER/PAGER=cat so paged commands (git log, etc.) never block on a pager.
     env = dict(os.environ, NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
     try:
         # stdin=DEVNULL so a program waiting on input gets EOF instead of
         # hanging; timeout kept under the UserPromptSubmit hook budget.
-        t = cmd_timeout()
+        t = timeout or cmd_timeout()
         r = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=t,
             env=env, stdin=subprocess.DEVNULL,
@@ -406,7 +416,7 @@ def run_capture(cmd, cwd=None):
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
         return (out.strip() or "(no output)", r.returncode)
     except subprocess.TimeoutExpired:
-        return (f"timed out ({cmd_timeout()}s). If it's interactive or long-running, "
+        return (f"timed out ({t}s). If it's interactive or long-running, "
                 f"open it in a terminal instead: sethu --launch \"{cmd}\"", None)
     except Exception as e:
         return (f"error: {e}", None)
@@ -525,30 +535,37 @@ def kill_daemons():
     return n
 
 
-def _connect(sock):
+def _connect(sock, wait=65):
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    s.settimeout(65)
+    s.settimeout(wait)
     s.connect(sock)
     return s
 
 
-def _spawn_daemon(sock, cwd_hint, use_rc=False):
+def _spawn_daemon(sock, cwd_hint, use_rc=False, timeout=None):
     shelld = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shelld.py")
     shell = os.environ.get("SHELL", "/bin/bash")
+    env = dict(os.environ)
+    if timeout:
+        env["SETHU_CMD_TIMEOUT"] = str(timeout)  # the daemon reads this at startup
     subprocess.Popen(
         [sys.executable, shelld, sock, cwd_hint or os.path.expanduser("~"),
          "1" if use_rc else "0", shell],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL, start_new_session=True,
+        stdin=subprocess.DEVNULL, start_new_session=True, env=env,
     )
 
 
-def shell_run(sid, cmd, cwd_hint=None, use_rc=False):
+def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
     sock = _sock_path(sid)
+    # Wait a bit longer than the command timeout for the reply, so a slow-but-
+    # allowed command isn't cut off by the client socket before the daemon's own
+    # timeout fires.
+    wait = (timeout or cmd_timeout()) + 10
     s = None
     try:
         try:
-            s = _connect(sock)  # an existing, live daemon
+            s = _connect(sock, wait)  # an existing, live daemon
         except OSError:
             # socket missing, or stale (daemon gone → "connection refused").
             # Remove it and spawn a fresh daemon, then connect once it's up.
@@ -556,10 +573,10 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False):
                 os.unlink(sock)
             except OSError:
                 pass
-            _spawn_daemon(sock, cwd_hint, use_rc)
+            _spawn_daemon(sock, cwd_hint, use_rc, timeout)
             for _ in range(80):
                 try:
-                    s = _connect(sock)
+                    s = _connect(sock, wait)
                     break
                 except OSError:
                     time.sleep(0.05)
@@ -579,7 +596,8 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False):
         first, _, rest = text.partition("\n")
         if first.strip() == "TIMEOUT":
             partial = (rest.strip() + "\n") if rest.strip() else ""
-            return (f"{partial}timed out ({cmd_timeout()}s). If it's interactive or "
+            secs = timeout or cmd_timeout()
+            return (f"{partial}timed out ({secs}s). If it's interactive or "
                     f"waiting for input, open it in a terminal instead: "
                     f"sethu --launch \"{cmd}\"", None)
         if first.strip().lstrip("-").isdigit():
@@ -670,12 +688,14 @@ def process(prompt, data):
                 f"  sethu --launch \"{cmd}\"\n"
                 f"then run `> {cmd}` (or just run it in your terminal)."}
 
+    t = cmd_timeout(cfg)
     if mode == "shell":
-        out, code = shell_run(sid, cmd, cwd_hint=data.get("cwd"), use_rc=cfg.get("rc"))
+        out, code = shell_run(sid, cmd, cwd_hint=data.get("cwd"),
+                              use_rc=cfg.get("rc"), timeout=t)
     elif mode == "stateless":
-        out, code = run_capture(cmd, cwd=data.get("cwd"))
+        out, code = run_capture(cmd, cwd=data.get("cwd"), timeout=t)
     else:  # cwd
-        out, code = run_capture(cmd, cwd=base)
+        out, code = run_capture(cmd, cwd=base, timeout=t)
 
     # Completion header: which mode (+ trust warning) + done/failed + exit code.
     # Each part is colored distinctly (colorblind-safe) so the status, command,
@@ -734,6 +754,7 @@ Manage it (type `sethu …` in the prompt or a terminal):
   sethu --rc on              shell mode: source your shell rc (aliases/functions/env)
   sethu --color off          turn off the colored result header (or NO_COLOR=1)
   sethu --maxlines 40        cap long output (full output saved to a file); 0 = unlimited
+  sethu --timeout 20         seconds a command may run before it times out
   sethu --restart            restart the persistent shell(s) (clear shell state)
   sethu --prefix ">"         change the trigger
   sethu --help               full flag reference
@@ -744,8 +765,8 @@ Config: {config_path()}   (now: mode={cfg['mode']}, {len(cfg['allow'])} allowed)
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
-               "trust", "rc", "color", "maxlines", "prefix", "restart", "runner",
-               "show", "help"}
+               "trust", "rc", "color", "maxlines", "timeout", "prefix", "restart",
+               "runner", "show", "help"}
 
 
 def normalize_argv(argv):
@@ -788,6 +809,8 @@ def main(argv=None):
                    help="color the result header (default on; NO_COLOR also disables)")
     p.add_argument("--maxlines", metavar="N", type=int,
                    help="truncate output beyond N lines (full output saved to a file); 0 = unlimited")
+    p.add_argument("--timeout", metavar="SECONDS", type=int,
+                   help="seconds a command may run before it's timed out (default 20)")
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
@@ -854,6 +877,14 @@ def main(argv=None):
         disp = "unlimited" if cfg["maxLines"] == 0 else f"{cfg['maxLines']} lines"
         print(f"✔ maxLines: {disp}")
         changed = True
+    if a.timeout is not None:
+        cfg["timeout"] = max(1, a.timeout)
+        killed = kill_daemons()  # so shell-mode daemons pick up the new timeout
+        note = f" (restarted {killed} shell daemon(s))" if killed else ""
+        warn = "  ⚠ over the ~30s hook budget — Claude Code may cut it off first." \
+            if cfg["timeout"] > 28 else ""
+        print(f"✔ timeout: {cfg['timeout']}s{note}{warn}")
+        changed = True
     if a.readonly:
         cfg["readonly"] = (a.readonly == "on")
         note = ""
@@ -891,6 +922,7 @@ def main(argv=None):
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (colored result header)")
     ml = max_lines(cfg)
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (truncate long output; full saved to a file)")
+    print(f"  timeout:  {cmd_timeout(cfg)}s   (max seconds a command may run)")
     if both:
         print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
               "Run `sethu --readonly on` or `sethu --trust off` to clean up.")

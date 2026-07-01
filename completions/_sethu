@@ -17,6 +17,7 @@ _sethu() {
     'rc:shell mode — source your shell rc (aliases/functions/env)'
     'color:color the result header (on/off)'
     'maxlines:cap long output beyond N lines (0 = unlimited)'
+    'timeout:seconds a command may run before timing out'
     'prefix:set the trigger prefix'
     'restart:restart the persistent shell(s)'
     'runner:show the current config'
@@ -26,7 +27,7 @@ _sethu() {
     if [[ $words[2] == -* ]]; then
       _values 'flag' \
         '--mode' '--allow' '--unallow' '--launch' '--unlaunch' \
-        '--readonly' '--trust' '--rc' '--color' '--maxlines' '--prefix' '--restart' '--runner' '--help'
+        '--readonly' '--trust' '--rc' '--color' '--maxlines' '--timeout' '--prefix' '--restart' '--runner' '--help'
     else
       _describe 'subcommand' subs
     fi
