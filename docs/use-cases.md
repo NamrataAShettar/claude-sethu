@@ -50,13 +50,10 @@ Depends on who needs the result:
 
 ```text
 sethu --allow "npm test"   # allow once (it writes / hits the network)
-> npm test                 # you check it — free
->> npm test                # tests fail → let Claude see + fix (costs tokens)
+> npm test                 # you check it, free
+>> npm test                # tests fail, let Claude see and fix (costs tokens)
 > pytest -q                > make lint       > tsc --noEmit
 ```
-
-For **Claude's own** verbose runs, have it use `quiet npm test` — that shrinks the
-output to a tail + error lines + exit code before it enters context.
 
 ## 5. Environment & system diagnostics (free)
 ```text

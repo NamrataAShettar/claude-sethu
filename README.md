@@ -79,19 +79,8 @@ Inside a Claude Code session:
 That's it. Read-only commands like `> ls` work immediately. To write, allowlist
 the command: `sethu --allow "npm test"`.
 
-<details>
-<summary>Optional: use <code>quiet</code> from a terminal</summary>
-
-Symlink `quiet` onto your `PATH` so you (or Claude) can shrink noisy command
-output anywhere:
-
-```bash
-ln -s "$PWD/bin/quiet" /opt/homebrew/bin/quiet   # any dir on your PATH
-```
-
-(You manage sethu itself right in the prompt box: type bare `sethu` for the
-options menu with a "when to use what" guide. No terminal setup needed.)
-</details>
+(You manage sethu right in the prompt box: type bare `sethu` for the options menu
+with a "when to use what" guide. No terminal setup needed.)
 
 ---
 
@@ -193,25 +182,6 @@ to do instead:
 ---
 
 ## 🧩 Extras
-
-<details>
-<summary><code>quiet</code>: shrink the output <em>Claude</em> pays for</summary>
-
-When **Claude** runs a command, its full output enters the context and costs
-tokens. `quiet` runs it, strips ANSI/progress noise, and keeps only a short tail
-(plus error lines on failure) with the real exit code, so a 200-line build becomes
-~20 lines.
-
-```bash
-quiet npm install         # only the tail + exit code reach Claude
-quiet --lines 40 pytest   # keep the last 40 lines
-```
-
-It exits with the command's own status. Drop the snippet from
-[`docs/token-thrifty.md`](docs/token-thrifty.md) into your `CLAUDE.md` to make
-Claude use it automatically. (`> cmd` keeps *your* commands out of context, while
-`quiet` shrinks *Claude's own*: different levers, same goal.)
-</details>
 
 <details>
 <summary>Long output &amp; temp files</summary>
