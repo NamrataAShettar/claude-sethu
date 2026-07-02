@@ -1039,14 +1039,14 @@ def _print_config(cfg):
         trust_disp = "set but OVERRIDDEN by readonly ⚠" if both else "ON ⚠ allowlist bypassed"
     ml = max_lines(cfg)
     print(f"sethu config ({config_path()}):")
-    print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
-    print(f"  mode:     {cfg['mode']}   (one of: {', '.join(MODES)})")
-    print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (auto-allow read-only cmds)")
-    print(f"  trust:    {trust_disp}")
-    print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (shell mode sources your shell rc)")
-    print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (colored result header)")
-    print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (truncate long output; full saved to a file)")
-    print(f"  timeout:  {cmd_timeout(cfg)}s   (max seconds a command may run)")
+    print(f"  prefix:   {cfg['prefix']!r}   (default '>'; > run+block free, >> send to Claude)")
+    print(f"  mode:     {cfg['mode']}   (default cwd; one of: {', '.join(MODES)})")
+    print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (default on; auto-allow read-only cmds)")
+    print(f"  trust:    {trust_disp}   (default off)")
+    print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (default off; shell mode sources your shell rc)")
+    print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (default on; colored result header)")
+    print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (default 40; truncate long output, full saved to a file)")
+    print(f"  timeout:  {cmd_timeout(cfg)}s   (default 20s; max seconds a command may run)")
     if both:
         print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
               "Run `sethu --readonly on` or `sethu --trust off` to clean up.")

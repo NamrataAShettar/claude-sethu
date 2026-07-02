@@ -256,7 +256,9 @@ class TestManagementCLI(Base):
 
     def test_runner_and_show_print_config(self):
         for flag in (["--runner"], ["--show"]):
-            self.assertIn("mode:", self._out(flag), flag)
+            out = self._out(flag)
+            self.assertIn("mode:", out, flag)
+            self.assertIn("default", out, flag)   # shows each field's default
 
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))

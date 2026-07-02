@@ -96,13 +96,13 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --allow "cmd"` | permit a writing command (read-only ones already work) |
 | `sethu --unallow "cmd"` | remove a command from the allowlist |
 | `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
-| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick — see below) |
+| `sethu --readonly off` | stop auto-allowing read-only commands |
+| `sethu --trust on` | ⚠ run **anything**, no allowlist (footgun) |
+| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
 | `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
 | `sethu --timeout 60` | give commands up to 60s |
-| `sethu --readonly off` | stop auto-allowing read-only commands |
-| `sethu --trust on` | ⚠ run **anything**, no allowlist (footgun) |
-| `sethu --runner` | show the current config |
+| `sethu --runner` | show the current config (with defaults) |
 
 Config lives in `~/.claude/sethu.json`.
 
