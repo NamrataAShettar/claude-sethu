@@ -75,27 +75,17 @@ That's it — read-only commands like `> ls` work immediately. To write, allowli
 the command: `sethu --allow "npm test"`.
 
 <details>
-<summary>Optional: terminal launchers &amp; tab-completion</summary>
+<summary>Optional: use <code>quiet</code> from a terminal</summary>
 
-Use `sethu …` and `quiet …` from a real terminal too:
-
-```bash
-ln -s "$PWD/bin/sethu" /opt/homebrew/bin/sethu   # any dir on your PATH
-ln -s "$PWD/bin/quiet" /opt/homebrew/bin/quiet
-```
-
-Tab-completion for the `sethu` terminal command:
+Symlink `quiet` onto your `PATH` so you (or Claude) can shrink noisy command
+output anywhere:
 
 ```bash
-# zsh: add the completions dir to fpath before compinit in ~/.zshrc
-fpath=("$PWD/completions" $fpath); autoload -U compinit && compinit
-# bash: source it in ~/.bashrc
-echo "source $PWD/completions/sethu.bash" >> ~/.bashrc
+ln -s "$PWD/bin/quiet" /opt/homebrew/bin/quiet   # any dir on your PATH
 ```
 
-(Completion works in a real terminal only — the prompt box can't autocomplete
-hook-intercepted text. In the box, type bare `sethu` for an options menu with a
-"when to use what" guide.)
+(You manage sethu itself right in the prompt box — type bare `sethu` for the
+options menu with a "when to use what" guide. No terminal setup needed.)
 </details>
 
 ---
