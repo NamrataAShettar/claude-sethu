@@ -198,7 +198,9 @@ by sethu. Send `> cmd` when Claude is idle.
 **"`X` isn't allowed to run."** sethu is read-only by default. The message tells you
 why (e.g. `git branch` can also write, `npm` isn't a read-only command). To permit
 it, `sethu --allow "X"`. If it's interactive (`vim`, a bare REPL), use
-`sethu --launch "X"` instead (allowlisting can't make those run).
+`sethu --launch "X"` instead (allowlisting can't make those run). To drop the
+guardrails entirely and run anything, there's `sethu --trust on`, but it's a
+footgun, so prefer allowlisting the specific commands you actually want.
 
 **"timed out after 20s."** Captured commands are capped under Claude Code's ~30s
 hook budget. Raise it a bit with `sethu --timeout`, or run long-lived commands
@@ -262,6 +264,10 @@ python3 -m unittest discover -s tests -v
 The suite covers the allowlist, read-only safety (injection and chaining refused),
 the interactive guard, all three modes (including the persistent shell), the `>>`
 pipe, and config round-trips. CI runs them on every push and PR. PRs welcome.
+
+Every feature and CLI argument maps to a test, tracked in a **coverage table** at
+the top of [`tests/test_sethu.py`](tests/test_sethu.py). If you add a feature or
+argument, add a row, write its test, and tick it, so coverage stays complete.
 
 ## ℹ️ About Claude Code
 

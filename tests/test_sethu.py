@@ -1,8 +1,52 @@
 #!/usr/bin/env python3
-"""Tests for sethu's engine. Stdlib only — run with:
+"""Tests for sethu's engine. Stdlib only. Run with:
 
     python3 -m unittest discover -s tests -v
     # or: python3 tests/test_sethu.py
+
+COVERAGE TABLE. Every feature and CLI argument maps to a test. When you add a
+feature or argument, add a row here, write its test, and tick it. Keep in sync.
+
+  Feature / CLI arg                      Test class(es)                        Done
+  -------------------------------------  ------------------------------------  ----
+  > cmd (run, block from model)          TestRunner, TestSafety                 [x]
+  >> cmd (run + send to Claude)          TestRunner, TestHookOutput             [x]
+  passthrough (non-sethu prompt)         TestRunner, TestLeadingWhitespace,     [x]
+                                         TestHookOutput
+  prefix only triggers at line start     TestLeadingWhitespace                  [x]
+  --allow                                TestConfig, TestSafety,                [x]
+                                         TestRefusalMessages
+  --unallow                              TestConfig                             [x]
+  --launch / --unlaunch                  TestLaunch, TestConfig                 [x]
+  --mode stateless/cwd/shell             TestModeSwitching, TestCwdMode,        [x]
+                                         TestShellMode
+  --readonly on/off                      TestReadonlyFn, TestSafety,            [x]
+                                         TestConfig, TestTrust
+  --trust on/off                         TestTrust                              [x]
+  --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
+  --color on/off                         TestColor, TestConfig                  [x]
+  --maxlines (truncation)                TestTruncate, TestConfig               [x]
+  --timeout                              TestTimeout, TestConfig                [x]
+  --prefix (custom trigger)              TestCustomPrefix, TestConfig,          [x]
+                                         TestHookGate
+  --restart                              TestManagementCLI, TestKillDaemons     [x]
+  --runner / --show (config)             TestManagementCLI, TestHookOutput      [x]
+  bare `sethu` (help menu)               TestManagementCLI                      [x]
+  subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
+  interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
+                                         TestRefusalMessages
+  readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
+  refusal messages explain why           TestRefusalMessages                    [x]
+  timeout message cites hook budget      TestRefusalMessages                    [x]
+  long-output truncation + temp file     TestTruncate                           [x]
+  temp-file sweep                        TestSweep                              [x]
+  socket path + 0600 perms               TestSocketPath, TestSocketPerms        [x]
+  kill / reap shell daemons              TestKillDaemons                        [x]
+  first-run welcome hint                 TestFirstRunHint                       [x]
+  hook fast-path gate                    TestHookGate                           [x]
+  hook output JSON shapes                TestHookOutput                         [x]
+  python3-missing shim (run.sh)          TestPython3Shim                        [x]
+  icon constant                          TestIcon                               [x]
 """
 import json
 import os
@@ -189,6 +233,31 @@ class TestSafety(Base):
         for c in ["git config user.name hacked", "git stash", "git branch -D main",
                   "git tag -d v1", "git remote add evil url"]:
             self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+
+
+class TestManagementCLI(Base):
+    """Management args whose *execution* path (not just argv normalization) needs
+    coverage: bare help, --runner/--show, --restart."""
+    def _out(self, argv):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _engine.main(argv)
+        return buf.getvalue()
+
+    def test_bare_prints_help_menu(self):
+        out = self._out([])
+        for t in ["sethu:", "> <cmd>", ">> <cmd>", "When to use what", "--allow",
+                  "--launch"]:
+            self.assertIn(t, out, t)
+
+    def test_runner_and_show_print_config(self):
+        for flag in (["--runner"], ["--show"]):
+            self.assertIn("mode:", self._out(flag), flag)
+
+    def test_restart_reports(self):
+        self.assertIn("restarted", self._out(["--restart"]))
 
 
 class TestRefusalMessages(Base):
