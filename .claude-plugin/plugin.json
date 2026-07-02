@@ -1,7 +1,7 @@
 {
   "name": "sethu",
   "displayName": "sethu — command bridge",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free (out of the model's context), or share it with Claude when you want it to act on the result. It's read-only by default, so any command that writes has to be added to an allowlist first.",
   "author": {
     "name": "namrataashettar"

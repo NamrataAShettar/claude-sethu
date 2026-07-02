@@ -7,6 +7,7 @@
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -607,6 +608,41 @@ class TestConfig(Base):
         _engine.save_config(c)
         self.assertEqual(_engine.load_config()["allow"], ["git status"])
         self.assertEqual(_engine.load_config()["mode"], "shell")
+
+
+class TestPython3Shim(unittest.TestCase):
+    """hooks/run.sh — the sh launcher that gives a clear message (instead of a
+    cryptic hook error) when python3 isn't installed."""
+    SHIM = os.path.join(HOOKS, "run.sh")
+
+    def _run(self, role, script, env, stdin="{}"):
+        return subprocess.run(
+            ["/bin/sh", self.SHIM, role, os.path.join(HOOKS, script)],
+            input=stdin, capture_output=True, text=True, env=env)
+
+    def test_missing_python3_session_warns(self):
+        # No python3 on PATH → session start shows one clear message.
+        r = self._run("session", "session_start.py", {"PATH": "/nonexistent"})
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("systemMessage", r.stdout)
+        self.assertIn("python3", r.stdout)
+        json.loads(r.stdout)  # must be valid JSON
+
+    def test_missing_python3_prompt_is_silent(self):
+        # No python3 → a prompt passes through silently (typing still works).
+        r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
+                      stdin='{"prompt":"hello"}')
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "")
+
+    def test_present_python3_runs_hook(self):
+        # With python3, the shim execs it — session_start emits the first-run
+        # hint when the welcome marker is absent (fresh config dir).
+        d = tempfile.mkdtemp()
+        env = dict(os.environ, SETHU_CONFIG=os.path.join(d, "sethu.json"))
+        r = self._run("session", "session_start.py", env)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("sethu is installed", r.stdout)
 
 
 if __name__ == "__main__":

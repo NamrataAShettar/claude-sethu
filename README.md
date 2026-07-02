@@ -1,8 +1,14 @@
 # `|^=^|` sethu — a command bridge for Claude Code
 
-Run terminal commands **straight from Claude Code's prompt box**. See the output
-yourself for **free** (it never touches the model), or share it with Claude only
-when you want it to act on the result.
+**The problem:** while working in Claude Code you constantly want to *peek* at
+things — `git status`, a diff, a file, `ls`. But every command you ask Claude to
+run dumps its output into the context window: it **costs tokens**, **clutters the
+conversation**, and fills your context faster (so auto-compaction hits sooner).
+Alt-tabbing to a real terminal breaks your flow.
+
+**sethu fixes that.** Run those commands **right in the prompt box** and see the
+output yourself for **free** — it never touches the model. Share it with Claude
+only when you actually want it to act on the result.
 
 ```text
 > git status          # runs it, shows YOU the output — zero tokens, model never sees it
@@ -26,13 +32,14 @@ is easy to spot.
 - **🎯 You control what Claude sees.** `>` keeps output private to you; `>>`
   feeds it in only when you want Claude to act on it. No more dumping noise into
   the conversation.
-- **🧰 A shell in the chat.** `sethu --mode shell` gives you a persistent shell —
+- **🐚 A shell in the chat.** `sethu --mode shell` gives you a persistent shell —
   `cd`, `export`, activate a venv, then run commands that share that state,
   without leaving the Claude window.
 - **🛡️ Safe by default.** Read-only mode is **on out of the box**: inspection
   commands just work, while anything that writes or chains is refused until you
   explicitly allow it.
-- **🪶 Zero dependencies.** Pure Python standard library — nothing to `pip install`.
+- **🪶 No package installs.** Pure Python standard library — no `pip`, no npm, no
+  third-party packages to manage. (It does need `python3` — see Requirements.)
 
 > **sethu vs. `!` bang mode:** `!` always feeds output to Claude (costs tokens).
 > sethu's edge is the **free, out-of-context `>`** — plus a persistent shell and
@@ -43,9 +50,18 @@ is easy to spot.
 
 ## 📦 Install
 
-**Requirements:** [Claude Code](https://claude.com/claude-code), `python3` on your
-`PATH`, and **macOS or Linux** (shell mode and `--launch` are Unix-only; Windows
-via WSL).
+**Requirements:**
+
+- [Claude Code](https://claude.com/claude-code).
+- **`python3`** on your `PATH` — sethu's hooks run it, so it's required. Check
+  with `python3 --version`. If it's missing (recent macOS doesn't ship it by
+  default), install via [Homebrew](https://brew.sh) (`brew install python`), the
+  Xcode Command Line Tools (`xcode-select --install`), or
+  [python.org](https://www.python.org/downloads/). Most Linux distros already
+  include it. *(If it's missing, sethu tells you at session start and stays out
+  of your way — your prompts still work normally — rather than erroring.)*
+- **macOS or Linux.** Shell mode and `--launch` are Unix-only; on Windows, use
+  WSL. (The plain `>` / `cwd` / `stateless` runner is otherwise portable.)
 
 Inside a Claude Code session:
 

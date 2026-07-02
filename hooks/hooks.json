@@ -5,8 +5,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/sethu_hook.py"]
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+              "prompt",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/sethu_hook.py"
+            ]
           }
         ]
       }
@@ -16,8 +20,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py"]
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+              "session",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py"
+            ]
           }
         ]
       }
