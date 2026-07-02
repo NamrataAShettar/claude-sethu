@@ -148,6 +148,24 @@ default it runs a clean `bash --norc` — `sethu --rc on` sources your `~/.zshrc
 
 ---
 
+## 🤝 Coexisting with other hooks
+
+sethu is a well-behaved `UserPromptSubmit` hook — it installs cleanly alongside
+your others (hooks run **in parallel**, with no ordering dependence):
+
+- **Normal prompts** (not `>` / `>>` / `sethu`) → sethu does **nothing** and passes
+  through, so your other hooks run exactly as they would without it.
+- **`>> cmd`** → sethu injects output as `additionalContext`, which Claude Code
+  **concatenates** with any other hook's context — they stack, they don't clash.
+- **`> cmd` / `sethu …`** → sethu blocks that one prompt (its purpose). Other hooks
+  still run their side effects, but the model doesn't (as intended).
+
+The only overlap to know about: another `UserPromptSubmit` hook that *also* acts on
+`>`-prefixed prompts. If two hooks both block the same prompt it stays blocked
+(fine) — but Claude Code doesn't document how two block *reasons* are combined, so
+the shown result may merge them. Rare in practice, since sethu only claims the `>`
+prefix.
+
 ## 🚧 When sethu *won't* work (the honest limits)
 
 sethu is a hook, and hooks have boundaries. Here's where it can't help — and what

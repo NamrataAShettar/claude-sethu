@@ -714,6 +714,46 @@ class TestKillDaemons(Base):
         self.assertFalse(os.path.exists(sock))       # socket removed
 
 
+class TestHookOutput(Base):
+    """End-to-end: sethu_hook.py emits the right hook JSON — and crucially emits
+    NOTHING on a normal prompt, so it coexists cleanly with a user's other
+    UserPromptSubmit hooks (which run in parallel; Claude Code concatenates any
+    additionalContext and lets any block win)."""
+    HOOK = os.path.join(HOOKS, "sethu_hook.py")
+
+    def _run(self, prompt):
+        data = {"prompt": prompt, "session_id": "hookout", "cwd": self.tmp}
+        env = dict(os.environ, SETHU_CONFIG=self.cfg, NO_COLOR="1")
+        return subprocess.run([sys.executable, self.HOOK], input=json.dumps(data),
+                              capture_output=True, text=True, env=env)
+
+    def test_normal_prompt_emits_nothing(self):
+        # The coexistence guarantee: a non-sethu prompt produces NO output.
+        self.write(readonly=True)
+        r = self._run("just a normal message to claude")
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(r.stdout.strip(), "")
+
+    def test_run_command_emits_block(self):
+        self.write(readonly=True)
+        out = json.loads(self._run("> ls").stdout)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("ls", out["reason"])
+
+    def test_pipe_emits_additional_context(self):
+        self.write(allow=["echo"])
+        out = json.loads(self._run(">> echo hi").stdout)
+        hso = out["hookSpecificOutput"]
+        self.assertEqual(hso["hookEventName"], "UserPromptSubmit")
+        self.assertIn("hi", hso["additionalContext"])
+        self.assertNotIn("decision", out)   # >> does NOT block
+
+    def test_sethu_management_emits_block(self):
+        self.write()
+        out = json.loads(self._run("sethu --runner").stdout)
+        self.assertEqual(out["decision"], "block")
+
+
 class TestPython3Shim(unittest.TestCase):
     """hooks/run.sh — the sh launcher that gives a clear message (instead of a
     cryptic hook error) when python3 isn't installed."""
