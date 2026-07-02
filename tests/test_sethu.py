@@ -422,6 +422,15 @@ class TestLeadingWhitespace(Base):
     def test_plain_prompt_still_passes_through(self):
         self.assertEqual(self.proc("just talking to claude"), {"passthrough": True})
 
+    def test_prefix_mid_prompt_does_not_trigger(self):
+        # `>` only triggers at the START of a prompt — never mid-text, so prompts
+        # that merely mention `>` are not intercepted.
+        self.write(readonly=True)
+        for p in ["compare a > b in the code", "if x > 0 then run it",
+                  "note a>b matters", "use foo > bar as an example"]:
+            self.assertEqual(self.proc(p), {"passthrough": True}, p)
+            self.assertFalse(sethu_hook._maybe_sethu(p), p)
+
 
 class TestCwdMode(Base):
     def test_cd_persists(self):
