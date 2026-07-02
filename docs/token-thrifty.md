@@ -26,10 +26,11 @@ Command output enters my context and costs tokens, so:
       grep -iE "error|fail|exception" /tmp/test.log | tail -20
 - Prefer terse forms: `git status -s`, `git log --oneline -10`, `pip install -q`,
   `npm install --silent`, build tools' `--quiet`/`-q` flags.
-- Don't re-`cat` an entire file I've already read — re-read only the specific
-  lines I need.
-- Don't re-run a command just to see its output again; refer back to the earlier
-  result already in context.
+- When re-reading a file, read only the specific lines you need, not the whole
+  file, *unless* it may have changed since you last read it. Correctness comes
+  first: if a file was edited, or a command's result could have changed (`git
+  status` after edits, tests after code changes, a listing after a write), re-read
+  or re-run it. Never rely on a stale earlier result to save tokens.
 - When checking a condition, return a small answer, not a dump:
   `test -f foo && echo yes` rather than `ls -la`.
 ```
