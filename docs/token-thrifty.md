@@ -39,3 +39,12 @@ Command output enters my context and costs tokens, so:
 Why this works: it changes behavior on *every* command, with no code and no risk
 of hiding something important — Claude still sees errors and exit codes, just not
 the hundreds of lines of progress noise around them.
+
+---
+
+**Further reading.** Anthropic's cost guide has a section on exactly this —
+[Reduce token usage](https://code.claude.com/docs/en/costs#reduce-token-usage),
+specifically *"offload processing to hooks"* (filter a command's output before
+Claude sees it) and *"delegate verbose operations to subagents."* sethu's `>`
+(keep output out of context entirely) and `quiet` (shrink what does go in) are
+drop-in levers for that same "a command's full output lands in context" problem.
