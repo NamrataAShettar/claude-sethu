@@ -1,6 +1,6 @@
-# `|^=^|` sethu सेतु — a command bridge for Claude Code
+# `|^=^|` sethu — a command bridge for Claude Code
 
-**सेतु** means *"bridge."* It lets you run terminal commands straight from
+**sethu** means *"bridge."* It lets you run terminal commands straight from
 Claude Code's prompt box, for free. Its mark — `|^=^|` — a little suspension
 bridge, and it prefixes every result so you can tell sethu's output at a glance.
 

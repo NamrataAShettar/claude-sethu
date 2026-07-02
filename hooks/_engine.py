@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sethu (सेतु, "bridge") — run commands from Claude Code's prompt box.
+"""sethu ("bridge") — run commands from Claude Code's prompt box.
 
 Type a command prefixed with `>` as a normal message and the UserPromptSubmit
 hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
@@ -768,7 +768,7 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""{ICON} sethu सेतु — run terminal commands from Claude's prompt box.
+    return f"""{ICON} sethu — run terminal commands from Claude's prompt box.
 
 In the prompt (no `!` needed — costs zero tokens):
   > <cmd>        run an allowlisted command; output shown to you, model blocked

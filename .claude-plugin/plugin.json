@@ -1,8 +1,8 @@
 {
   "name": "sethu",
-  "displayName": "sethu सेतु — command bridge",
-  "version": "0.8.6",
-  "description": "सेतु (\"bridge\") — run commands from Claude Code's prompt box. `> cmd` runs it for free (model never sees it); `>> cmd` also pipes the output to Claude. Commands execute directly in your shell, bypassing Claude Code's per-command permission prompts — read-only by default, writing commands require an explicit allowlist (`sethu --allow`).",
+  "displayName": "sethu — command bridge",
+  "version": "0.8.7",
+  "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free (out of the model's context), or share it with Claude when you want it to act on the result. It's read-only by default, so any command that writes has to be added to an allowlist first.",
   "author": {
     "name": "namrataashettar"
   },

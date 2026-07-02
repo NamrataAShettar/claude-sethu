@@ -1,6 +1,6 @@
 {
   "name": "sethu",
-  "description": "Run terminal commands from Claude Code's prompt box. Commands execute directly in your shell, bypassing Claude Code's per-command permission prompts — read-only by default; writing commands need an explicit allowlist.",
+  "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free, or share it with Claude when you want it acted on. Read-only by default.",
   "owner": {
     "name": "namrataashettar"
   },
@@ -8,7 +8,7 @@
     {
       "name": "sethu",
       "source": "./",
-      "description": "Run commands from the prompt box: `> cmd` runs it in your shell and blocks the model (zero tokens), `>> cmd` also pipes output to Claude. Executes WITHOUT Claude Code's per-command permission prompts — read-only by default; writes require `sethu --allow`."
+      "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free (out of the model's context), or share it with Claude when you want it to act on the result. It's read-only by default, so any command that writes has to be added to an allowlist first."
     }
   ]
 }
