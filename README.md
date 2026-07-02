@@ -18,7 +18,7 @@ is easy to spot.
 
 ---
 
-## Why sethu
+## ⚡ Why sethu
 
 - **💸 Save tokens.** Glance at `> git status`, `> git diff`, `> ls`,
   `> cat config.json` as often as you like — for free. The output stays out of
@@ -41,7 +41,7 @@ is easy to spot.
 
 ---
 
-## Install
+## 📦 Install
 
 **Requirements:** [Claude Code](https://claude.com/claude-code), `python3` on your
 `PATH`, and **macOS or Linux** (shell mode and `--launch` are Unix-only; Windows
@@ -84,7 +84,7 @@ hook-intercepted text. In the box, type bare `sethu` for an options menu with a
 
 ---
 
-## Cheat sheet
+## 📋 Cheat sheet
 
 Type these as normal messages (no `!`). Bare `sethu` shows the full menu. Flag and
 subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
@@ -105,7 +105,7 @@ Config lives in `~/.claude/sethu.json`.
 
 ---
 
-## Statefulness modes
+## 🔀 Statefulness modes
 
 `sethu --mode <mode>` picks how much state persists between commands:
 
@@ -122,7 +122,7 @@ default it runs a clean `bash --norc` — `sethu --rc on` sources your `~/.zshrc
 
 ---
 
-## Safety
+## 🛡️ Safety
 
 - **Read-only by default.** Inspection commands (`ls`, `cat`, `git log`, …) run;
   anything that writes, chains, or execs is refused until you `sethu --allow` it.
@@ -138,7 +138,7 @@ default it runs a clean `bash --norc` — `sethu --rc on` sources your `~/.zshrc
 
 ---
 
-## When sethu *won't* work (the honest limits)
+## 🚧 When sethu *won't* work (the honest limits)
 
 sethu is a hook, and hooks have boundaries. Here's where it can't help — and what
 to do instead:
@@ -157,7 +157,7 @@ to do instead:
 
 ---
 
-## Extras
+## 🧩 Extras
 
 <details>
 <summary><code>quiet</code> — shrink the output <em>Claude</em> pays for</summary>
@@ -208,7 +208,7 @@ with `-i`; a script path, `-c`, or `-m` means batch mode.
 
 ---
 
-## Feedback &amp; feature requests
+## 💬 Feedback & feature requests
 
 sethu is actively developed and **your input shapes it.** Found a rough edge, hit
 a case that didn't work, or want a feature (a `--console` shared pane? another
@@ -218,7 +218,7 @@ reports, ideas, and "this was confusing" notes are all genuinely welcome.
 
 ---
 
-## Tests &amp; contributing
+## 🧪 Tests & contributing
 
 Stdlib only, no dependencies:
 
@@ -230,7 +230,7 @@ The suite covers the allowlist, read-only safety (injection/chaining refused),
 the interactive guard, all three modes (incl. the persistent shell), the `>>`
 pipe, and config round-trips. CI runs them on every push and PR. PRs welcome.
 
-## About Claude Code
+## ℹ️ About Claude Code
 
 sethu is a plugin for **[Claude Code](https://claude.com/claude-code)**,
 Anthropic's official CLI for Claude, built entirely from its extension points (a
