@@ -6,7 +6,7 @@ the Claude Code chat.
 
 **The problem:** while working in Claude Code you constantly want to *peek* at
 things like `git status`, a diff, a file, or `ls`. But every command you ask
-Claude to run dumps its output into the context window: it **costs tokens**,
+Claude to run dumps its output into the context window. That **costs tokens**,
 **clutters the conversation**, and fills your context faster (so auto-compaction
 hits sooner). Alt-tabbing to a real terminal breaks your flow.
 
@@ -15,40 +15,41 @@ output yourself for **free** (it never touches the model). Share it with Claude
 only when you actually want it to act on the result.
 
 ```text
-> git status          # runs it, shows YOU the output — zero tokens, model never sees it
+> git status          # runs it, shows YOU the output (zero tokens, model never sees it)
 >> git status         # runs it AND sends the output to Claude (costs tokens, on purpose)
 sethu --allow "npm test"   # read-only commands work already; allowlist the ones that write
 ```
 
 Type a command prefixed with `>` as an ordinary message. A `UserPromptSubmit`
-hook catches it, runs it locally, and blocks the prompt — so the model never
-sees it and you spend nothing. Use `>>` when you *do* want Claude to see the
-output. Every result is tagged with the little `|^=^|` bridge so sethu's output
-is easy to spot.
+hook catches it, runs it locally, and blocks the prompt, so the model never sees
+it and you spend nothing. Use `>>` when you *do* want Claude to see the output.
+Every result is tagged with the little `|^=^|` bridge so sethu's output is easy
+to spot.
 
 ---
 
 ## ⚡ Why sethu
 
-- **💸 Save tokens.** Glance at `> git status`, `> git diff`, `> ls`,
-  `> cat config.json` as often as you like — for free. The output stays out of
+- **💸 Save tokens.** Glance at `> git status`, `> git diff`, `> ls`, or
+  `> cat config.json` as often as you like, all for free. The output stays out of
   the context window, so Claude stays sharp longer and big sessions stay cheaper.
-- **🎯 You control what Claude sees.** `>` keeps output private to you; `>>`
+- **🎯 You control what Claude sees.** `>` keeps output private to you, while `>>`
   feeds it in only when you want Claude to act on it. No more dumping noise into
   the conversation.
-- **🐚 A shell in the chat.** `sethu --mode shell` gives you a persistent shell —
+- **🐚 A shell in the chat.** `sethu --mode shell` gives you a persistent shell:
   `cd`, `export`, activate a venv, then run commands that share that state,
   without leaving the Claude window.
-- **🛡️ Safe by default.** Read-only mode is **on out of the box**: inspection
-  commands just work, while anything that writes or chains is refused until you
+- **🛡️ Safe by default.** Read-only mode is **on out of the box**, so inspection
+  commands just work while anything that writes or chains is refused until you
   explicitly allow it.
-- **🪶 No package installs.** Pure Python standard library — no `pip`, no npm, no
-  third-party packages to manage. (It does need `python3` — see Requirements.)
+- **🪶 No package installs.** Pure Python standard library, so there's no `pip`,
+  no npm, and no third-party packages to manage. (It does need `python3`, see
+  Requirements.)
 
-> **sethu vs. `!` bang mode:** `!` always feeds output to Claude (costs tokens).
-> sethu's edge is the **free, out-of-context `>`** — plus a persistent shell and
-> allowlist guardrails. If you always want Claude to act on the output, `!` is
-> fine; if you want to look at things for free, use `>`.
+> **sethu vs. `!` bang mode:** `!` always feeds output to Claude, so it always
+> costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
+> persistent shell and allowlist guardrails. If you always want Claude to act on
+> the output, `!` is fine. If you want to look at things for free, use `>`.
 
 ---
 
@@ -57,13 +58,13 @@ is easy to spot.
 **Requirements:**
 
 - [Claude Code](https://claude.com/claude-code).
-- **`python3`** on your `PATH` — sethu's hooks run it, so it's required. Check
-  with `python3 --version`. If it's missing (recent macOS doesn't ship it by
-  default), install via [Homebrew](https://brew.sh) (`brew install python`), the
-  Xcode Command Line Tools (`xcode-select --install`), or
+- **`python3`** on your `PATH`. sethu's hooks run it, so it's required. Check with
+  `python3 --version`. If it's missing (recent macOS doesn't ship it by default),
+  install via [Homebrew](https://brew.sh) (`brew install python`), the Xcode
+  Command Line Tools (`xcode-select --install`), or
   [python.org](https://www.python.org/downloads/). Most Linux distros already
-  include it. *(If it's missing, sethu tells you at session start and stays out
-  of your way — your prompts still work normally — rather than erroring.)*
+  include it. (If it's missing, sethu tells you at session start and stays out of
+  your way, so your prompts still work normally, rather than erroring.)
 - **macOS or Linux.** Shell mode and `--launch` are Unix-only; on Windows, use
   WSL. (The plain `>` / `cwd` / `stateless` runner is otherwise portable.)
 
@@ -75,7 +76,7 @@ Inside a Claude Code session:
 /reload-plugins
 ```
 
-That's it — read-only commands like `> ls` work immediately. To write, allowlist
+That's it. Read-only commands like `> ls` work immediately. To write, allowlist
 the command: `sethu --allow "npm test"`.
 
 <details>
@@ -88,7 +89,7 @@ output anywhere:
 ln -s "$PWD/bin/quiet" /opt/homebrew/bin/quiet   # any dir on your PATH
 ```
 
-(You manage sethu itself right in the prompt box — type bare `sethu` for the
+(You manage sethu itself right in the prompt box: type bare `sethu` for the
 options menu with a "when to use what" guide. No terminal setup needed.)
 </details>
 
@@ -101,8 +102,8 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 
 | You type | What happens |
 | --- | --- |
-| `> cmd` | run it, show **you** the output — free |
-| `>> cmd` | run it and **send output to Claude** — costs tokens |
+| `> cmd` | run it, show **you** the output (free) |
+| `>> cmd` | run it and **send output to Claude** (costs tokens) |
 | `sethu --allow "cmd"` | permit a writing command (read-only ones already work) |
 | `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
 | `sethu --mode shell` | persistent shell (`cd`/`export`/venv stick) |
@@ -114,8 +115,9 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 Config lives in `~/.claude/sethu.json`.
 
 > 💡 **Want ideas?** See **[docs/use-cases.md](docs/use-cases.md)** for a full,
-> copy-paste catalog — git, file/log inspection, build & test, persistent-shell
-> workflows, quick lookups, and more — with the exact commands for each.
+> copy-paste catalog covering git, file and log inspection, build and test,
+> persistent-shell workflows, quick lookups, and more, with the exact commands
+> for each.
 
 ---
 
@@ -130,49 +132,50 @@ Config lives in `~/.claude/sethu.json`.
 | `shell` | ✅ | ✅ | one persistent `bash` (PTY daemon), reused |
 
 `shell` mode keeps a long-lived bash so `cd`, env vars, `source`, and venvs carry
-across commands. It idles out after 30 min; `sethu --restart` clears it. By
-default it runs a clean `bash --norc` — `sethu --rc on` sources your `~/.zshrc` /
-`~/.bashrc` so your aliases and functions work.
+across commands. It idles out after 30 min, and `sethu --restart` clears it on
+demand. By default it runs a clean `bash --norc`. Turn on `sethu --rc on` to
+source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
 
 ---
 
 ## 🛡️ Safety
 
-- **Read-only by default.** Inspection commands (`ls`, `cat`, `git log`, …) run;
-  anything that writes, chains, or execs is refused until you `sethu --allow` it.
+- **Read-only by default.** Inspection commands (`ls`, `cat`, `git log`, …) run,
+  while anything that writes, chains, or execs is refused until you
+  `sethu --allow` it.
 - **The runner executes in your shell without Claude Code's per-command
-  permission prompts** — so keep the allowlist tight, like shell aliases.
+  permission prompts**, so keep the allowlist tight, like shell aliases.
 - **Injection-hardened.** An allowlisted command may only be followed by plain
-  arguments — not an unquoted pipe, redirect, `;`/`&&`, subshell, or substitution.
+  arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or substitution.
   Allowing `ls` does **not** allow `> ls; rm -rf ~`. (Metacharacters *inside
-  quotes* are fine — `> python3 -c "import os; print(1)"` works.)
+  quotes* are fine, so `> python3 -c "import os; print(1)"` works.)
 - **Trust mode is opt-in.** `sethu --trust on` removes the allowlist entirely and
-  runs anything — a real footgun. It's off by default, warned loudly, and shown
-  as `⚠trust` in the status line while active.
+  runs anything, a real footgun. It's off by default, warned loudly, and shown as
+  `⚠trust` in the status line while active.
 
 ---
 
 ## 🤝 Coexisting with other hooks
 
-sethu is a well-behaved `UserPromptSubmit` hook — it installs cleanly alongside
+sethu is a well-behaved `UserPromptSubmit` hook, and it installs cleanly alongside
 your others (hooks run **in parallel**, with no ordering dependence):
 
-- **Normal prompts** (not `>` / `>>` / `sethu`) → sethu does **nothing** and passes
-  through, so your other hooks run exactly as they would without it.
-- **`>> cmd`** → sethu injects output as `additionalContext`, which Claude Code
-  **concatenates** with any other hook's context — they stack, they don't clash.
-- **`> cmd` / `sethu …`** → sethu blocks that one prompt (its purpose). Other hooks
-  still run their side effects, but the model doesn't (as intended).
+- **Normal prompts** (not `>` / `>>` / `sethu`) pass straight through: sethu does
+  **nothing**, so your other hooks run exactly as they would without it.
+- **`>> cmd`** injects output as `additionalContext`, which Claude Code
+  **concatenates** with any other hook's context, so they stack rather than clash.
+- **`> cmd` / `sethu …`** blocks that one prompt (its purpose). Other hooks still
+  run their side effects, but the model doesn't (as intended).
 
-The only overlap to know about: another `UserPromptSubmit` hook that *also* acts on
-`>`-prefixed prompts. If two hooks both block the same prompt it stays blocked
-(fine) — but Claude Code doesn't document how two block *reasons* are combined, so
-the shown result may merge them. Rare in practice, since sethu only claims the `>`
-prefix.
+The only overlap to know about is another `UserPromptSubmit` hook that *also* acts
+on `>`-prefixed prompts. If two hooks both block the same prompt it stays blocked
+(fine), but Claude Code doesn't document how two block *reasons* are combined, so
+the shown result may merge them. That's rare in practice, since sethu only claims
+the `>` prefix.
 
 ## 🚧 When sethu *won't* work (the honest limits)
 
-sethu is a hook, and hooks have boundaries. Here's where it can't help — and what
+sethu is a hook, and hooks have boundaries. Here's where it can't help, and what
 to do instead:
 
 | Situation | Why | Do this instead |
@@ -183,20 +186,20 @@ to do instead:
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
 | **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
 
-> A **launched** terminal (`--launch`) is a *plain shell* — it does **not** share
+> A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for
-> interactive/long-running programs, not a safer runner.
+> interactive or long-running programs, not a safer runner.
 
 ---
 
 ## 🧩 Extras
 
 <details>
-<summary><code>quiet</code> — shrink the output <em>Claude</em> pays for</summary>
+<summary><code>quiet</code>: shrink the output <em>Claude</em> pays for</summary>
 
 When **Claude** runs a command, its full output enters the context and costs
 tokens. `quiet` runs it, strips ANSI/progress noise, and keeps only a short tail
-(plus error lines on failure) with the real exit code — a 200-line build becomes
+(plus error lines on failure) with the real exit code, so a 200-line build becomes
 ~20 lines.
 
 ```bash
@@ -206,8 +209,8 @@ quiet --lines 40 pytest   # keep the last 40 lines
 
 It exits with the command's own status. Drop the snippet from
 [`docs/token-thrifty.md`](docs/token-thrifty.md) into your `CLAUDE.md` to make
-Claude use it automatically. (`> cmd` keeps *your* commands out of context;
-`quiet` shrinks *Claude's own* — different levers, same goal.)
+Claude use it automatically. (`> cmd` keeps *your* commands out of context, while
+`quiet` shrinks *Claude's own*: different levers, same goal.)
 </details>
 
 <details>
@@ -215,7 +218,8 @@ Claude use it automatically. (`> cmd` keeps *your* commands out of context;
 
 Big output (`ps aux`, `ls -R`) is capped at **40 lines** inline (`sethu --maxlines`
 to change; `0` = unlimited). The full text is saved to a per-session file and a
-note points at it — open it, or `sethu --launch "less <path>"` to scroll it.
+note points at it, so you can open it, or `sethu --launch "less <path>"` to scroll
+it.
 
 Storage stays bounded: the saved file is **reused per session** (one at a time),
 sethu sweeps its own temp files older than 7 days, and the OS temp dir is purged
@@ -231,20 +235,20 @@ An interpreter *with a script* runs and exits, so it works captured:
 sethu --allow python3
 > python3 build/report.py     # runs, output captured, zero tokens
 > python3 -c "print(2**10)"   # -c / -m are batch too
-> python3                     # bare REPL → refused; use --launch
+> python3                     # bare REPL, refused (use --launch)
 ```
 
 `python`/`node`/`irb`/`ipython` count as interactive only when launched bare or
-with `-i`; a script path, `-c`, or `-m` means batch mode.
+with `-i`. A script path, `-c`, or `-m` means batch mode.
 </details>
 
 ---
 
 ## 💬 Feedback & feature requests
 
-sethu is actively developed and **your input shapes it.** Found a rough edge, hit
-a case that didn't work, or want a feature (a `--console` shared pane? another
-mode?) — please
+sethu is actively developed and **your input shapes it.** If you find a rough
+edge, hit a case that didn't work, or want a feature (a `--console` shared pane?
+another mode?), please
 **[open an issue](https://github.com/NamrataAShettar/claude-sethu/issues)**. Bug
 reports, ideas, and "this was confusing" notes are all genuinely welcome.
 
@@ -258,15 +262,15 @@ Stdlib only, no dependencies:
 python3 -m unittest discover -s tests -v
 ```
 
-The suite covers the allowlist, read-only safety (injection/chaining refused),
-the interactive guard, all three modes (incl. the persistent shell), the `>>`
+The suite covers the allowlist, read-only safety (injection and chaining refused),
+the interactive guard, all three modes (including the persistent shell), the `>>`
 pipe, and config round-trips. CI runs them on every push and PR. PRs welcome.
 
 ## ℹ️ About Claude Code
 
 sethu is a plugin for **[Claude Code](https://claude.com/claude-code)**,
 Anthropic's official CLI for Claude, built entirely from its extension points (a
-`UserPromptSubmit` hook for `>`/`>>`, a `SessionStart` hook for the first-run
+`UserPromptSubmit` hook for `>`/`>>`, and a `SessionStart` hook for the first-run
 hint). Docs: [Claude Code](https://claude.com/claude-code) ·
 [Plugins](https://code.claude.com/docs/en/plugins) ·
 [Hooks](https://code.claude.com/docs/en/hooks).
