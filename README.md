@@ -1,13 +1,17 @@
-# `|^=^|` sethu — a command bridge for Claude Code
+# `|^=^|` sethu: a bridge between Claude Code's prompt box and your shell
+
+The name **sethu** is Sanskrit for *"bridge"* (a word shared across Indian
+languages). It bridges the two, so you can run terminal commands without leaving
+the Claude Code chat.
 
 **The problem:** while working in Claude Code you constantly want to *peek* at
-things — `git status`, a diff, a file, `ls`. But every command you ask Claude to
-run dumps its output into the context window: it **costs tokens**, **clutters the
-conversation**, and fills your context faster (so auto-compaction hits sooner).
-Alt-tabbing to a real terminal breaks your flow.
+things like `git status`, a diff, a file, or `ls`. But every command you ask
+Claude to run dumps its output into the context window: it **costs tokens**,
+**clutters the conversation**, and fills your context faster (so auto-compaction
+hits sooner). Alt-tabbing to a real terminal breaks your flow.
 
 **sethu fixes that.** Run those commands **right in the prompt box** and see the
-output yourself for **free** — it never touches the model. Share it with Claude
+output yourself for **free** (it never touches the model). Share it with Claude
 only when you actually want it to act on the result.
 
 ```text
