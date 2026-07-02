@@ -47,6 +47,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   hook output JSON shapes                TestHookOutput                         [x]
   python3-missing shim (run.sh)          TestPython3Shim                        [x]
   icon constant                          TestIcon                               [x]
+  every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
 """
 import json
 import os
@@ -915,6 +916,23 @@ class TestPython3Shim(unittest.TestCase):
         r = self._run("session", "session_start.py", env)
         self.assertEqual(r.returncode, 0)
         self.assertIn("sethu is installed", r.stdout)
+
+
+class TestCoverageEnforcement(unittest.TestCase):
+    """Self-enforcing coverage: every CLI argument the engine defines must be
+    referenced somewhere in this test file. Add a flag without a test and CI goes
+    red — no reliance on anyone remembering to update the coverage table by hand.
+    (This is a presence check, not proof of assertion quality; pair with a real
+    test for the flag's behavior.)"""
+    def test_every_cli_arg_is_referenced_in_tests(self):
+        import re
+        engine = open(_engine.__file__).read()
+        tests = open(__file__).read()
+        calls = re.findall(r"add_argument\((.*?)\)", engine, re.DOTALL)
+        args = {opt for body in calls for opt in re.findall(r'"(--[a-z]+)"', body)}
+        self.assertTrue(args, "no CLI args discovered — regex likely broke")
+        missing = sorted(a for a in args if a not in tests)
+        self.assertEqual(missing, [], f"CLI args with no test reference: {missing}")
 
 
 if __name__ == "__main__":
