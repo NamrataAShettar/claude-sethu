@@ -24,6 +24,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
                                          TestConfig, TestTrust
   --trust on/off                         TestTrust                              [x]
   --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
+  state builtins hint at shell mode      TestStateBuiltinHint                   [x]
   --color on/off                         TestColor, TestConfig                  [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
@@ -623,6 +624,19 @@ class TestShellMode(Base):
         self.assertNotIn("path too long", r["block"])
 
 
+class TestStateBuiltinHint(Base):
+    def test_state_builtin_in_nonshell_hints_shell_mode(self):
+        # export/source/alias/… only persist in shell mode; cwd/stateless should
+        # proactively point there instead of silently no-op'ing or refusing.
+        for m in ("cwd", "stateless"):
+            self.write(mode=m, readonly=True, color=False)
+            for c in ["export FOO=1", "source venv/bin/activate", "alias g=git",
+                      ". env/bin/activate", "unset PATHX"]:
+                b = self.proc("> " + c)["block"]
+                self.assertIn("shell mode", b, f"{m}: {c}")
+                self.assertIn("--mode shell", b, f"{m}: {c}")
+
+
 class TestRcAliases(Base):
     def test_alias_and_env_from_rc_work_in_shell_mode(self):
         # With --rc on, an alias AND an exported var from the shell rc are usable
@@ -902,11 +916,23 @@ class TestPython3Shim(unittest.TestCase):
         json.loads(r.stdout)  # must be valid JSON
 
     def test_missing_python3_prompt_is_silent(self):
-        # No python3 → a prompt passes through silently (typing still works).
+        # No python3 → a NORMAL prompt passes through silently (typing still works).
         r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
                       stdin='{"prompt":"hello"}')
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
+
+    def test_missing_python3_sethu_prompt_warns(self):
+        # No python3 → a SETHU-looking prompt (> … / sethu …) is blocked with the
+        # install guidance, so it doesn't silently do nothing (or leak to Claude).
+        for prompt in ('{"prompt":"> ls"}', '{"prompt":"  > ls"}',
+                       '{"prompt":"sethu --runner"}'):
+            r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
+                          stdin=prompt)
+            self.assertEqual(r.returncode, 0, prompt)
+            out = json.loads(r.stdout)               # valid JSON
+            self.assertEqual(out["decision"], "block", prompt)
+            self.assertIn("python3", out["reason"], prompt)
 
     def test_present_python3_runs_hook(self):
         # With python3, the shim execs it — session_start emits the first-run

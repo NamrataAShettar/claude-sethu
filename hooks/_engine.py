@@ -343,6 +343,11 @@ INTERACTIVE = {
 # a REPL. `-i` forces the prompt open, so it stays interactive.
 _REPL = {"python", "python3", "node", "irb", "ipython"}
 
+# Shell builtins that set state (env vars, aliases). They only persist in shell
+# mode; in cwd/stateless each command is a throwaway subprocess, so running one is
+# a silent no-op — better to point the user at shell mode than let it vanish.
+_STATE_BUILTINS = {"export", "source", ".", "alias", "unalias", "unset"}
+
 
 def is_interactive(cmd):
     toks = cmd.split()
@@ -759,6 +764,17 @@ def process(prompt, data):
                 f"`{first}` is interactive and needs a real terminal, so the runner "
                 f"can't capture it (it would hang). Allowlisting won't help. Open it "
                 f"in a terminal instead:\n  sethu --launch \"{cmd}\""}
+
+    # State-setting builtins only stick in shell mode; in cwd/stateless they run in
+    # a throwaway subprocess and vanish. Point the user at shell mode up front
+    # instead of silently no-op'ing (or refusing with an unrelated reason).
+    if mode != "shell" and cmd.split() and cmd.split()[0] in _STATE_BUILTINS:
+        first = cmd.split()[0]
+        return {"block":
+                f"`{first}` only persists in shell mode. In `{mode}` mode each command "
+                f"runs in a fresh subprocess, so this wouldn't carry to the next one. "
+                f"Switch with `sethu --mode shell` (add `sethu --rc on` to load your "
+                f"aliases and functions)."}
 
     # readonly wins if a legacy config somehow has both on (safe default).
     trust_on = cfg.get("trust") and not cfg.get("readonly")

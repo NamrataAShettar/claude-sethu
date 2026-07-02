@@ -253,7 +253,7 @@ reports, ideas, and "this was confusing" notes are all genuinely welcome.
 
 ---
 
-## 🧪 Tests & contributing
+## 🧪 Tests
 
 Stdlib only, no dependencies:
 
@@ -263,11 +263,9 @@ python3 -m unittest discover -s tests -v
 
 The suite covers the allowlist, read-only safety (injection and chaining refused),
 the interactive guard, all three modes (including the persistent shell), the `>>`
-pipe, and config round-trips. CI runs them on every push and PR. PRs welcome.
-
-Every feature and CLI argument maps to a test, tracked in a **coverage table** at
-the top of [`tests/test_sethu.py`](tests/test_sethu.py). If you add a feature or
-argument, add a row, write its test, and tick it, so coverage stays complete.
+pipe, and config round-trips. Every feature and CLI argument maps to a test (a
+coverage table at the top of `tests/test_sethu.py`, guarded by a meta-test that
+fails if any argument is untested). CI runs them on every push and PR.
 
 ## ℹ️ About Claude Code
 
