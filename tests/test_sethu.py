@@ -435,6 +435,37 @@ class TestCwdMode(Base):
         self.assertIn("stateless", self.proc("> cd /tmp")["block"])
 
 
+class TestModeSwitching(Base):
+    def test_switch_cwd_to_stateless_changes_cd_behavior(self):
+        sid = "ms-cwd"
+        self.write(mode="cwd", readonly=True, color=False)
+        self.proc("> cd /tmp", sid=sid)
+        self.assertIn("tmp", self.proc("> pwd", sid=sid)["block"])   # cwd persists
+        _engine.main(["--mode", "stateless"])                        # switch
+        self.assertEqual(_engine.load_config()["mode"], "stateless")
+        self.assertIn("stateless", self.proc("> cd /tmp", sid=sid)["block"])
+
+    def test_leaving_shell_mode_reaps_the_daemon(self):
+        sid = "ms-shell"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", allow=["export", "echo"], color=False)
+        self.proc("> export X=1", sid=sid)                           # spawns daemon
+        sock = _engine._sock_path(sid)
+        self.assertTrue(os.path.exists(sock))
+        _engine.main(["--mode", "cwd"])                              # switch away
+        self.assertEqual(_engine.load_config()["mode"], "cwd")
+        self.assertFalse(os.path.exists(sock))                       # daemon reaped
+
+    def test_switch_into_shell_mode_persists_state(self):
+        sid = "ms-into-shell"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="cwd", allow=["export", "echo"], color=False)
+        _engine.main(["--mode", "shell"])
+        self.assertEqual(_engine.load_config()["mode"], "shell")
+        self.proc("> export FOO=switched", sid=sid)
+        self.assertIn("switched", self.proc("> echo $FOO", sid=sid)["block"])
+
+
 class TestShellMode(Base):
     def test_env_and_cd_persist(self):
         sid = "test-shell-1"

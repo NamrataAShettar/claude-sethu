@@ -109,6 +109,10 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 
 Config lives in `~/.claude/sethu.json`.
 
+> 💡 **Want ideas?** See **[docs/use-cases.md](docs/use-cases.md)** for a full,
+> copy-paste catalog — git, file/log inspection, build & test, persistent-shell
+> workflows, quick lookups, and more — with the exact commands for each.
+
 ---
 
 ## 🔀 Statefulness modes

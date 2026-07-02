@@ -19,11 +19,16 @@ Peek at repo state constantly without paying tokens or cluttering the chat.
 > git status
 > git diff                 > git diff --staged
 > git log --oneline -15
-> git branch -a            > git show HEAD
-> git stash list           > git remote -v
-> git blame src/app.py
+> git show HEAD            > git blame src/app.py
+> git ls-files             > git describe --tags
 >> git diff                # share with Claude: "review these changes"
 ```
+
+Read-only git subcommands (`status`, `log`, `diff`, `show`, `blame`, `ls-files`,
+`describe`, `rev-parse`, `shortlog`, `reflog`…) work out of the box. A few —
+`branch`, `stash`, `remote`, `config` — can *also write* (`git branch -D`,
+`git stash drop`, `git remote add`, `git config <key> <value>`), so they're **not**
+auto-allowed. Permit them explicitly if you want them: `sethu --allow "git branch"`.
 
 ## 2. Filesystem & navigation (free)
 ```text
