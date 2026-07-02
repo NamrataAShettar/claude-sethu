@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Local-only planning/design notes (kept out of the repo for now)
+BACKLOG.md
+docs/during-ponder-execution.md
