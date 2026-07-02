@@ -678,8 +678,9 @@ HELP = ("sethu: type `> <command>` to run an allowlisted command (free), or "
 
 
 def _why_refused(cmd, cfg):
-    """A short, human explanation of WHY a command was refused, when we can detect
-    it, so the refusal teaches the model instead of hiding it. Empty when it's just
+    """A short, plain-language reason WHY a command was refused, when we can detect
+    it, so the refusal explains itself to the user instead of hiding the cause.
+    Empty when it's just
     'the allowlist is empty' (the generic message covers that)."""
     if not cfg.get("readonly"):
         return ""  # allowlist simply empty; nothing special to explain
