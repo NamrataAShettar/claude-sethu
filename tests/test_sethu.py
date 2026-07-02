@@ -271,6 +271,30 @@ class TestRunner(Base):
     def test_passthrough(self):
         self.assertEqual(self.proc("just a normal prompt"), {"passthrough": True})
 
+    def test_pipe_output_is_fenced_as_untrusted(self):
+        # `>>` output is labeled untrusted data (prompt-injection defense).
+        self.write(allow=["echo"], color=False)
+        ctx = self.proc(">> echo hi")["context"]
+        self.assertIn("untrusted", ctx.lower())
+        self.assertIn("BEGIN COMMAND OUTPUT", ctx)
+        self.assertIn("hi", ctx)
+
+    def test_launch_listed_command_opens_terminal(self):
+        # A `>` command on the launch list is opened in a terminal, not captured.
+        self.write(launch=["vim"], color=False)
+        orig = _engine.launch_in_terminal
+        _engine.launch_in_terminal = lambda c: "↗ opened"
+        try:
+            r = self.proc("> vim notes.md")["block"]
+        finally:
+            _engine.launch_in_terminal = orig
+        self.assertIn("opened", r)
+
+    def test_cd_to_bad_dir_message(self):
+        self.write(readonly=True, color=False)
+        self.assertIn("not a directory",
+                      self.proc("> cd /no_such_dir_xyz123")["block"])
+
 
 class TestIcon(Base):
     def test_icon_on_header_not_in_pipe(self):
@@ -609,6 +633,55 @@ class TestConfig(Base):
         self.assertEqual(_engine.load_config()["allow"], ["git status"])
         self.assertEqual(_engine.load_config()["mode"], "shell")
 
+    def test_max_lines_coerces_malformed(self):
+        # A malformed maxLines must not crash the hook — fall back to the default.
+        self.assertEqual(_engine.max_lines({"maxLines": "oops"}), 40)
+        self.assertEqual(_engine.max_lines({}), 40)
+        self.assertEqual(_engine.max_lines({"maxLines": 0}), 0)      # unlimited
+        self.assertEqual(_engine.max_lines({"maxLines": 100}), 100)
+
+    def test_setter_flags_roundtrip(self):
+        # The management CLI persists each config-setter flag.
+        _engine.main(["--color", "off"])
+        self.assertFalse(_engine.load_config()["color"])
+        _engine.main(["--maxlines", "100"])
+        self.assertEqual(_engine.load_config()["maxLines"], 100)
+        _engine.main(["--prefix", "!!"])
+        self.assertEqual(_engine.load_config()["prefix"], "!!")
+        _engine.main(["--mode", "cwd"])
+        self.assertEqual(_engine.load_config()["mode"], "cwd")
+
+    def test_allow_unallow_and_unlaunch_roundtrip(self):
+        _engine.main(["--allow", "git status"])
+        self.assertIn("git status", _engine.load_config()["allow"])
+        _engine.main(["--unallow", "git status"])
+        self.assertNotIn("git status", _engine.load_config()["allow"])
+        # unlaunch removes without opening a terminal
+        c = _engine.load_config(); c["launch"] = ["vim"]; _engine.save_config(c)
+        _engine.main(["--unlaunch", "vim"])
+        self.assertNotIn("vim", _engine.load_config()["launch"])
+
+
+class TestCustomPrefix(Base):
+    def test_custom_prefix_intercepts_and_default_passes(self):
+        self.write(prefix="!!", readonly=True, color=False)
+        self.assertIn("[cwd]", self.proc("!! pwd")["block"])       # !! runs
+        self.assertEqual(self.proc("> pwd"), {"passthrough": True})  # > no longer
+
+
+class TestKillDaemons(Base):
+    def test_kill_daemons_reaps_live_daemon(self):
+        # Regression for the v0.8.0 glob fix: kill_daemons must actually find and
+        # shut down a live shell daemon (the socket is named sethu-<hash>-p<n>).
+        sid = "test-killdaemons"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", allow=["echo"])
+        self.proc("> echo hi", sid=sid)              # spawns the daemon
+        sock = _engine._sock_path(sid)
+        self.assertTrue(os.path.exists(sock))
+        self.assertGreaterEqual(_engine.kill_daemons(), 1)
+        self.assertFalse(os.path.exists(sock))       # socket removed
+
 
 class TestPython3Shim(unittest.TestCase):
     """hooks/run.sh — the sh launcher that gives a clear message (instead of a
@@ -643,6 +716,62 @@ class TestPython3Shim(unittest.TestCase):
         r = self._run("session", "session_start.py", env)
         self.assertEqual(r.returncode, 0)
         self.assertIn("sethu is installed", r.stdout)
+
+
+class TestQuiet(unittest.TestCase):
+    """bin/quiet — shrink a command's output to a tail + errors + exit code."""
+    QUIET = os.path.join(os.path.dirname(HOOKS), "bin", "quiet")
+
+    def _run(self, *args):
+        return subprocess.run([sys.executable, self.QUIET, *args],
+                              capture_output=True, text=True)
+
+    def test_tail_and_hidden_counts(self):
+        r = self._run("seq", "100")               # default keeps last 20
+        self.assertEqual(r.returncode, 0)
+        self.assertIn("100 line(s)", r.stdout)
+        self.assertIn("80 hidden", r.stdout)
+        self.assertTrue(r.stdout.rstrip().endswith("100"))  # last line shown
+        self.assertNotIn("\n5\n", r.stdout)                 # an early line hidden
+
+    def test_lines_flag(self):
+        r = self._run("--lines", "5", "seq", "100")
+        self.assertIn("95 hidden", r.stdout)
+
+    def test_exit_code_preserved_on_failure(self):
+        r = self._run("false")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("✗", r.stdout)
+        self.assertIn("exit 1", r.stdout)
+
+    def test_ansi_is_stripped(self):
+        # ANSI in the command's OUTPUT is stripped (via a script so the ANSI is in
+        # the output, not the echoed command line).
+        d = tempfile.mkdtemp()
+        script = os.path.join(d, "a.sh")
+        with open(script, "w") as f:
+            f.write(r"printf 'a\033[31mRED\033[0mb\n'" + "\n")
+        r = self._run("bash", script)
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("\x1b", r.stdout)
+        self.assertIn("aREDb", r.stdout)
+
+    def test_error_lines_surfaced_from_above(self):
+        d = tempfile.mkdtemp()
+        script = os.path.join(d, "s.sh")
+        with open(script, "w") as f:
+            f.write('echo "ERROR: something broke"\n'
+                    'for i in $(seq 1 10); do echo "noise $i"; done\n'
+                    'exit 1\n')
+        r = self._run("--lines", "2", "bash", script)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("error lines from above", r.stdout)
+        self.assertIn("ERROR: something broke", r.stdout)
+
+    def test_no_args_usage(self):
+        r = self._run()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("usage", r.stdout.lower())
 
 
 if __name__ == "__main__":
