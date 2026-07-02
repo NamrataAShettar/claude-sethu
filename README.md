@@ -94,8 +94,10 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `> cmd` | run it, show **you** the output (free) |
 | `>> cmd` | run it and **send output to Claude** (costs tokens) |
 | `sethu --allow "cmd"` | permit a writing command (read-only ones already work) |
+| `sethu --unallow "cmd"` | remove a command from the allowlist |
 | `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
 | `sethu --mode shell` | persistent shell (`cd`/`export`/venv stick) |
+| `sethu --restart` | restart the persistent shell (clears shell-mode state) |
 | `sethu --timeout 60` | give commands up to 60s |
 | `sethu --readonly off` | stop auto-allowing read-only commands |
 | `sethu --trust on` | ⚠ run **anything**, no allowlist (footgun) |
@@ -178,6 +180,31 @@ to do instead:
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for
 > interactive or long-running programs, not a safer runner.
+
+---
+
+## 🛟 Troubleshooting
+
+**"UserPromptSubmit operation blocked by hook:" shows before my output.** That's
+normal, and it means it worked. Claude Code prints that wrapper around any prompt a
+hook handles locally; it's how sethu keeps your command out of the model. The
+`|^=^| [mode] ✓ exit 0` line below it is your actual result.
+
+**I typed `> cmd` but nothing ran, or Claude answered it instead.** You typed it
+while Claude was still generating. sethu only fires on a prompt that *starts* a
+turn, so a `>` typed mid-response is read by the model (and costs tokens), not run
+by sethu. Send `> cmd` when Claude is idle.
+
+**"`X` isn't allowed to run."** sethu is read-only by default. The message tells you
+why (e.g. `git branch` can also write, `npm` isn't a read-only command). To permit
+it, `sethu --allow "X"`. If it's interactive (`vim`, a bare REPL), use
+`sethu --launch "X"` instead (allowlisting can't make those run).
+
+**"timed out after 20s."** Captured commands are capped under Claude Code's ~30s
+hook budget. Raise it a bit with `sethu --timeout`, or run long-lived commands
+(servers, `tail -f`) in a real terminal with `sethu --launch`.
+
+Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/issues).
 
 ---
 

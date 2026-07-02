@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""sethu ("bridge") — run commands from Claude Code's prompt box.
+"""sethu ("bridge"): run terminal commands from Claude Code's prompt box.
 
 Type a command prefixed with `>` as a normal message and the UserPromptSubmit
 hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
@@ -193,12 +193,13 @@ def _welcome_marker():
 
 
 FIRST_RUN_HINT = (
-    f"{ICON} sethu is installed — run terminal commands free from this box. "
-    "`> git status` runs it **directly in your shell (no per-command permission "
-    "prompt)** and shows output to you only (zero tokens); `>> git status` also "
-    "sends it to Claude. Read-only commands (ls, cat, git log…) work out of the "
-    "box; writes need `sethu --allow \"<cmd>\"`. Type `sethu` for a \"when to use "
-    "what\" guide."
+    f"{ICON} sethu is installed. Run terminal commands right from this box:\n"
+    "• `> git status`  → runs it, shows output to YOU only. Free (Claude never "
+    "sees it).\n"
+    "• `>> git status` → runs it AND sends the output to Claude (costs tokens).\n"
+    "Works when Claude is idle (a `>` typed while Claude is thinking goes to the "
+    "model). Read-only commands work now; writes need `sethu --allow \"<cmd>\"`. "
+    "Type `sethu` for the menu."
 )
 
 
@@ -448,8 +449,10 @@ def is_readonly_safe(cmd):
 def _timeout_msg(secs, cmd):
     """Shared 'command timed out' message → the user, pointing at --launch. Used
     by both the captured runner and the shell daemon so they can't drift."""
-    return (f"timed out ({secs}s). If it's interactive, long-running, or waiting "
-            f"for input, open it in a terminal instead: sethu --launch \"{cmd}\"")
+    return (f"timed out after {secs}s. sethu caps a captured command's runtime to "
+            f"stay under Claude Code's ~30s hook budget (nudge it with "
+            f"`sethu --timeout`). For interactive, long-running, or input-waiting "
+            f"commands, run it in a real terminal instead: sethu --launch \"{cmd}\"")
 
 
 def run_capture(cmd, cwd=None, timeout=None):
@@ -674,6 +677,37 @@ HELP = ("sethu: type `> <command>` to run an allowlisted command (free), or "
         "`sethu --runner`.")
 
 
+def _why_refused(cmd, cfg):
+    """A short, human explanation of WHY a command was refused, when we can detect
+    it, so the refusal teaches the model instead of hiding it. Empty when it's just
+    'the allowlist is empty' (the generic message covers that)."""
+    if not cfg.get("readonly"):
+        return ""  # allowlist simply empty; nothing special to explain
+    toks = cmd.split()
+    if not toks:
+        return ""
+    prog = os.path.basename(toks[0])
+    if prog == "git":
+        sub = toks[1] if len(toks) > 1 else ""
+        if sub and sub not in READONLY_GIT:
+            return (f"In read-only mode, `git {sub}` can also change the repo, so "
+                    f"it isn't auto-allowed (read-only git is status/log/diff/show/"
+                    f"blame/…).")
+    if prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
+        return (f"In read-only mode, `{prog}` is read-only but a flag here writes a "
+                f"file, so it isn't auto-allowed.")
+    if prog == "find" and any(t in _FIND_WRITE_PRIMARIES for t in toks):
+        return ("In read-only mode, this `find` action writes or runs a command, so "
+                "it isn't auto-allowed.")
+    if _DANGER.search(cmd):
+        return ("Read-only mode refuses redirection, chaining (`;`, `&&`, `&`), and "
+                "command substitution for safety, even for read-only programs.")
+    if prog not in READONLY:
+        return (f"`{prog}` isn't in the read-only command set, so it isn't "
+                f"auto-allowed in read-only mode.")
+    return ""
+
+
 def process(prompt, data):
     """Return one of: {'passthrough':True} | {'block':text} | {'context':text}."""
     cfg = load_config()
@@ -715,30 +749,33 @@ def process(prompt, data):
         return {"block": "stateless mode — cd doesn't persist. Use an inline path "
                          "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`)."}
 
+    # Interactive programs would hang the captured runner (no terminal), and
+    # --allow can't change that. Checked BEFORE the allow gate so an interactive
+    # command always gets the --launch guidance, never a misleading "allow it".
+    if not is_cd(cmd) and is_interactive(cmd):
+        first = os.path.basename(cmd.split()[0])
+        return {"block":
+                f"`{first}` is interactive and needs a real terminal, so the runner "
+                f"can't capture it (it would hang). Allowlisting won't help. Open it "
+                f"in a terminal instead:\n  sethu --launch \"{cmd}\""}
+
     # readonly wins if a legacy config somehow has both on (safe default).
     trust_on = cfg.get("trust") and not cfg.get("readonly")
     allowed = trust_on or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
     if not is_cd(cmd) and not allowed:
+        why = _why_refused(cmd, cfg)
+        why_line = (why + "\n") if why else ""
         ro = "" if cfg.get("readonly") else \
             "  • Auto-allow read-only cmds: sethu --readonly on\n"
         return {"block":
-                f"`{cmd}` isn't allowed (nothing runs unless you allow it).\n"
-                f"  • Allow it:        sethu --allow \"{cmd}\"\n"
+                f"`{cmd}` isn't allowed to run.\n"
+                f"{why_line}"
+                f"  • Allow it (your call):  sethu --allow \"{cmd}\"\n"
                 f"{ro}"
-                f"  • Open a terminal: sethu --launch \"{cmd}\"\n"
-                f"  • See config:      sethu --runner"}
-
-    # Interactive programs would hang the captured runner — send them to a real
-    # terminal instead (in any mode).
-    if is_interactive(cmd):
-        first = os.path.basename(cmd.split()[0])
-        return {"block":
-                f"`{first}` is interactive — the runner has no terminal, so it would "
-                f"hang. Open it in a real terminal instead:\n"
-                f"  sethu --launch \"{cmd}\"\n"
-                f"then run `> {cmd}` (or just run it in your terminal)."}
+                f"  • Open in a terminal:    sethu --launch \"{cmd}\"\n"
+                f"  • See config:            sethu --runner"}
 
     t = cmd_timeout(cfg)
     if mode == "shell":
@@ -789,17 +826,19 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""{ICON} sethu — run terminal commands from Claude's prompt box.
+    return f"""{ICON} sethu: run terminal commands from Claude's prompt box.
 
-In the prompt (no `!` needed — costs zero tokens):
-  > <cmd>        run an allowlisted command; output shown to you, model blocked
+In the prompt (no `!` needed, costs zero tokens):
+  > <cmd>        run a command; output shown to you, model blocked (free)
   >> <cmd>       run it AND send the output to Claude (this costs tokens)
 
 When to use what:
-  > cmd                 just inspect something yourself — free, stays out of context
+  > cmd                 just inspect something yourself. Free, stays out of context.
   >> cmd                you want Claude to act on the output (costs tokens)
   --allow "<cmd>"       permit a writing/other command (read-only ones already work)
-  --launch  <cmd>       the command is interactive (vim, top, ssh) — pop a real terminal
+  --launch  <cmd>       interactive (vim, top, ssh) or long-running. --allow can't
+                        help those; this pops a real terminal
+  --readonly off        stop auto-running read-only commands (allow nothing unlisted)
   --mode shell          you need cd / export / venv to persist across commands
   --trust on            you want > to run anything, no guardrails (footgun)
 
@@ -852,7 +891,7 @@ def main(argv=None):
         return
 
     p = argparse.ArgumentParser(
-        prog="sethu", description="sethu — run commands from Claude's prompt box",
+        prog="sethu", description="sethu: run terminal commands from Claude's prompt box",
         epilog=help_text(), formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--allow", metavar="CMD", help="allow a command for the runner")

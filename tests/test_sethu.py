@@ -191,6 +191,33 @@ class TestSafety(Base):
             self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
 
 
+class TestRefusalMessages(Base):
+    def test_interactive_leads_with_launch_not_allow(self):
+        # Interactive commands point to --launch (allowlisting can't make them run).
+        self.write(readonly=True, color=False)
+        for c in ["vim", "python3", "top"]:
+            b = self.proc("> " + c)["block"]
+            self.assertIn("--launch", b, c)
+            self.assertIn("interactive", b, c)
+            self.assertNotIn('sethu --allow', b, c)   # allow is futile here
+
+    def test_refusal_explains_why_and_still_offers_allow(self):
+        self.write(readonly=True, color=False)
+        cases = {
+            "git branch": "can also change the repo",
+            "sort -o out f": "writes a file",
+            "npm test": "isn't in the read-only command set",
+            "ls; rm -rf ~": "refuses redirection, chaining",
+        }
+        for cmd, why in cases.items():
+            b = self.proc("> " + cmd)["block"]
+            self.assertIn(why, b, cmd)
+            self.assertIn('sethu --allow', b, cmd)   # still offered (user's call)
+
+    def test_timeout_message_mentions_hook_budget(self):
+        self.assertIn("hook budget", _engine._timeout_msg(20, "sleep 99"))
+
+
 class TestTrust(Base):
     def test_trust_bypasses_allowlist(self):
         self.write(trust=True)  # nothing allowlisted
@@ -526,6 +553,29 @@ class TestShellMode(Base):
         self.assertNotIn("path too long", r["block"])
 
 
+class TestRcAliases(Base):
+    def test_alias_and_env_from_rc_work_in_shell_mode(self):
+        # With --rc on, an alias AND an exported var from the shell rc are usable
+        # via `>` in shell mode (the daemon runs $SHELL and sources its rc).
+        home = tempfile.mkdtemp()
+        with open(os.path.join(home, ".bashrc"), "w") as f:
+            f.write("alias greet='echo ALIAS_OK'\nexport RCVAR=rc_env_ok\n")
+        sid = "test-rc-alias"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", rc=True, allow=["greet", "echo"], color=False)
+        saved = {k: os.environ.get(k) for k in ("HOME", "SHELL")}
+        os.environ["HOME"] = home
+        os.environ["SHELL"] = "/bin/bash"
+        try:
+            alias_out = self.proc("> greet", sid=sid)["block"]
+            env_out = self.proc("> echo $RCVAR", sid=sid)["block"]
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        self.assertIn("ALIAS_OK", alias_out)    # alias from rc ran
+        self.assertIn("rc_env_ok", env_out)     # exported var from rc is set
+
+
 class TestTimeout(Base):
     def setUp(self):
         super().setUp()
@@ -538,7 +588,7 @@ class TestTimeout(Base):
     def test_cwd_timeout_points_to_launch(self):
         self.write(allow=["sleep"], color=False)
         r = self.proc("> sleep 5")["block"]
-        self.assertIn("timed out (2s)", r)
+        self.assertIn("timed out after 2s", r)
         self.assertIn("--launch", r)
 
     def test_config_timeout_used(self):
@@ -548,7 +598,7 @@ class TestTimeout(Base):
         cfg = _engine.load_config()
         self.assertEqual(_engine.cmd_timeout(cfg), 1)
         r = self.proc("> sleep 5")["block"]
-        self.assertIn("timed out (1s)", r)
+        self.assertIn("timed out after 1s", r)
 
     def test_env_overrides_config_timeout(self):
         self.write(timeout=99)
@@ -566,7 +616,7 @@ class TestTimeout(Base):
         self.addCleanup(self._shutdown, sid)
         self.write(mode="shell", allow=["sleep", "echo"], color=False)
         r = self.proc("> sleep 5", sid=sid)["block"]
-        self.assertIn("timed out (2s)", r)
+        self.assertIn("timed out after 2s", r)
         # The shell must recover — the stuck command was interrupted, so the next
         # command runs normally instead of hanging behind it.
         r2 = self.proc("> echo alive", sid=sid)["block"]
