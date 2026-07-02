@@ -32,16 +32,19 @@ import sys
 import tempfile
 import time
 
+# Defaults referenced in more than one place live here as named constants, so a
+# value is defined exactly once (DEFAULTS below and the coercion helpers reuse
+# them). CMD_TIMEOUT: max seconds a captured command may run before it's timed
+# out and the user is pointed at `--launch`; kept safely under Claude Code's
+# UserPromptSubmit hook budget (~30s), overridable with SETHU_CMD_TIMEOUT (the
+# daemon inherits it too — _shelld.py mirrors this, keep the two in sync).
+CMD_TIMEOUT = 20
+MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
+
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
             "readonly": True, "trust": False, "rc": False, "color": True,
-            "maxLines": 40, "timeout": 20}
+            "maxLines": MAX_LINES, "timeout": CMD_TIMEOUT}
 MODES = ("stateless", "cwd", "shell")
-
-# Max seconds a captured command may run before it's timed out and the user is
-# pointed at `--launch`. Kept safely under Claude Code's UserPromptSubmit hook
-# budget (~30s). Override with SETHU_CMD_TIMEOUT (the daemon inherits it too).
-# _shelld.py mirrors this — keep the two in sync.
-CMD_TIMEOUT = 20
 
 
 def cmd_timeout(cfg=None):
@@ -65,13 +68,14 @@ def max_lines(cfg):
     """maxLines from config, coerced safely — a malformed value (e.g. a string)
     must not crash the hook, which would break every `>` prompt."""
     try:
-        return int(cfg.get("maxLines", 40) or 0)
+        return int(cfg.get("maxLines", MAX_LINES) or 0)
     except (ValueError, TypeError):
-        return 40
+        return MAX_LINES
 
-# ANSI colors for the result header. Colorblind-safe (blue/orange, not green/red)
-# per Okabe-Ito. Off via `sethu --color off` or the NO_COLOR env var. Only the
-# header is colored — the command's own output is left untouched.
+# ANSI colors for the result header. Colorblind-safe: success is blue (not
+# green), so there's no green/red pairing to confuse — red is used only for
+# failures, distinguishable from blue. Off via `sethu --color off` or the
+# NO_COLOR env var. Only the header is colored — the command output is untouched.
 _ANSI = {
     "ok": "38;5;75",       # sky blue   — success (exit 0)
     "fail": "1;38;5;203",  # bold red   — nonzero exit (errors stand out)
@@ -147,18 +151,18 @@ def _sweep_temp(now, force=False):
             pass
 
 
-def _truncate(out, sid, max_lines, on):
-    """If `out` exceeds max_lines, keep the first max_lines and write the full
-    text to the per-session file, returning (display, note). Otherwise return
-    (out, ""). max_lines <= 0 disables truncation. note is a short pointer at
-    the full output for the caller to place (colored for display, plain for the
+def _truncate(out, sid, cap, on):
+    """If `out` exceeds `cap` lines, keep the first `cap` and write the full text
+    to the per-session file, returning (display, note). Otherwise return
+    (out, ""). `cap` <= 0 disables truncation. `note` is a short pointer at the
+    full output for the caller to place (colored for display, plain for the
     pipe-to-Claude path)."""
-    if max_lines <= 0:
+    if cap <= 0:
         return out, ""
-    # Only split off the first max_lines (+1 to detect "there's more") instead of
-    # materializing every line — matters when `out` is huge (e.g. `> cat bigfile`).
-    head = out.split("\n", max_lines)
-    if len(head) <= max_lines:
+    # Only split off the first `cap` lines (+1 to detect "there's more") instead
+    # of materializing every line — matters when `out` is huge (`> cat bigfile`).
+    head = out.split("\n", cap)
+    if len(head) <= cap:
         return out, ""            # fewer lines than the cap → nothing to truncate
     total = out.count("\n") + 1   # cheap C-level scan, no list of all lines
     path = _output_path(sid)
@@ -171,8 +175,8 @@ def _truncate(out, sid, max_lines, on):
             f.write(out)
     except Exception:
         path = None
-    hidden = total - max_lines
-    shown = "\n".join(head[:max_lines])
+    hidden = total - cap
+    shown = "\n".join(head[:cap])
     where = (f"full output: {path}  (open it, or `sethu --launch \"less {path}\"`)"
              if path else "full output unavailable (couldn't write temp file)")
     note = f"… {hidden} more line{'s' if hidden != 1 else ''} truncated · {where}"
@@ -216,6 +220,9 @@ def first_run_hint():
 
 
 def load_config():
+    """Return the effective config: DEFAULTS overlaid with any keys present in
+    the user's config file. Every DEFAULTS key is guaranteed present (so callers
+    can index directly). A missing or malformed file falls back to DEFAULTS."""
     cfg = {k: (list(v) if isinstance(v, list) else v) for k, v in DEFAULTS.items()}
     try:
         with open(config_path()) as f:
@@ -230,6 +237,8 @@ def load_config():
 
 
 def save_config(cfg):
+    """Write the known config keys to the config file (creating its dir), as
+    pretty-printed JSON. Only DEFAULTS keys are persisted."""
     path = config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -322,8 +331,10 @@ def resolve_cd(arg, base):
 INTERACTIVE = {
     "vi", "vim", "nvim", "nano", "emacs", "pico", "less", "more", "most", "man",
     "top", "htop", "btop", "ssh", "telnet", "tmux", "screen", "watch", "fg",
-    "python", "python3", "node", "irb", "psql", "mysql", "sqlite3", "ipython",
+    "psql", "mysql", "sqlite3",
 }
+# NB: interpreter REPLs (python/node/irb/ipython) are handled by _REPL below,
+# which supersedes INTERACTIVE for them — don't re-add them here.
 
 # Interpreters/REPLs that are only interactive when launched *bare* (or `-i`).
 # With a script, `-c CODE`, or `-m MODULE` they run to completion and return, so
@@ -387,7 +398,10 @@ READONLY_GIT = {
     "rev-parse", "shortlog", "rev-list", "cat-file", "reflog",
 }
 # Shell metacharacters that enable writes / chaining / substitution / background
-# (newlines included — a multi-line prompt is multiple commands).
+# (newlines included — a multi-line prompt is multiple commands). This is a blunt
+# regex on the whole string: readonly mode is a conservative curated fast-path, so
+# it deliberately rejects even a quoted `;` (`echo "a;b"`). The allowlist path
+# (`_is_chain_unsafe`) is the quote-aware one — the divergence is intentional.
 _DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
@@ -431,6 +445,13 @@ def is_readonly_safe(cmd):
     return True
 
 
+def _timeout_msg(secs, cmd):
+    """Shared 'command timed out' message → the user, pointing at --launch. Used
+    by both the captured runner and the shell daemon so they can't drift."""
+    return (f"timed out ({secs}s). If it's interactive, long-running, or waiting "
+            f"for input, open it in a terminal instead: sethu --launch \"{cmd}\"")
+
+
 def run_capture(cmd, cwd=None, timeout=None):
     """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error."""
     # GIT_PAGER/PAGER=cat so paged commands (git log, etc.) never block on a pager.
@@ -447,8 +468,7 @@ def run_capture(cmd, cwd=None, timeout=None):
         out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
         return (out.strip() or "(no output)", r.returncode)
     except subprocess.TimeoutExpired:
-        return (f"timed out ({t}s). If it's interactive or long-running, "
-                f"open it in a terminal instead: sethu --launch \"{cmd}\"", None)
+        return (_timeout_msg(t, cmd), None)
     except Exception as e:
         return (f"error: {e}", None)
 
@@ -588,6 +608,10 @@ def _spawn_daemon(sock, cwd_hint, use_rc=False, timeout=None):
 
 
 def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
+    """Run `cmd` in this session's persistent shell (shell mode), returning
+    (output, exit_code). Connects to the per-session daemon over its Unix socket,
+    spawning (or respawning, on a stale socket) one if needed, sends the command,
+    and reads the reply. exit_code is None on a daemon timeout or error."""
     sock = _sock_path(sid)
     # Wait a bit longer than the command timeout for the reply, so a slow-but-
     # allowed command isn't cut off by the client socket before the daemon's own
@@ -627,10 +651,7 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
         first, _, rest = text.partition("\n")
         if first.strip() == "TIMEOUT":
             partial = (rest.strip() + "\n") if rest.strip() else ""
-            secs = timeout or cmd_timeout()
-            return (f"{partial}timed out ({secs}s). If it's interactive or "
-                    f"waiting for input, open it in a terminal instead: "
-                    f"sethu --launch \"{cmd}\"", None)
+            return (partial + _timeout_msg(timeout or cmd_timeout(), cmd), None)
         if first.strip().lstrip("-").isdigit():
             return (rest.strip() or "(no output)", int(first))
         # No exit-code line (e.g. an older daemon) — show the whole reply rather
@@ -951,19 +972,23 @@ def main(argv=None):
     if changed:
         save_config(cfg)
         return
-    # default / --runner: show config
-    print(f"sethu config ({config_path()}):")
-    print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
-    print(f"  mode:     {cfg['mode']}   (one of: {', '.join(MODES)})")
+    _print_config(cfg)  # default / --runner: show current config
+
+
+def _print_config(cfg):
+    """Pretty-print the effective config (the `sethu` / `--runner` view)."""
     both = cfg.get("readonly") and cfg.get("trust")
-    print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (auto-allow read-only cmds)")
     trust_disp = "off"
     if cfg.get("trust"):
         trust_disp = "set but OVERRIDDEN by readonly ⚠" if both else "ON ⚠ allowlist bypassed"
+    ml = max_lines(cfg)
+    print(f"sethu config ({config_path()}):")
+    print(f"  prefix: {cfg['prefix']!r}   (> run+block free, >> run+send to Claude)")
+    print(f"  mode:     {cfg['mode']}   (one of: {', '.join(MODES)})")
+    print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (auto-allow read-only cmds)")
     print(f"  trust:    {trust_disp}")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (colored result header)")
-    ml = max_lines(cfg)
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (truncate long output; full saved to a file)")
     print(f"  timeout:  {cmd_timeout(cfg)}s   (max seconds a command may run)")
     if both:

@@ -5,11 +5,16 @@ Holds one long-lived `bash` behind a PTY and serves commands over a Unix socket,
 one command per connection. Because the same bash stays alive across commands,
 state persists: `cd`, `export`, `source`, and venv activation all stick.
 
-Usage (started automatically by the engine):  _shelld.py <socket_path> <cwd>
+Usage (started automatically by _engine._spawn_daemon):
+    _shelld.py <socket_path> <cwd> <use_rc:0|1> <shell>
+where <use_rc> sources the user's shell rc (aliases/functions/env) and <shell>
+is the shell to run when it does (else a clean `bash --norc`).
 
 Protocol: client sends "<command>\\n"; daemon runs it, replies with the captured
-output, closes the connection. The daemon exits after IDLE_TIMEOUT seconds with
-no connections, and on the special command "__SETHU_SHUTDOWN__".
+output, closes the connection. On a command timeout the reply is
+"TIMEOUT\\n<partial output>" (the daemon Ctrl-C's the stuck command so the shell
+recovers). The daemon exits after IDLE_TIMEOUT seconds with no connections, and
+on the special command "__SETHU_SHUTDOWN__".
 """
 import os
 import pty

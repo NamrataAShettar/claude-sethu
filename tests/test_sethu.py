@@ -15,6 +15,7 @@ HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, HOOKS)
 import _engine  # noqa: E402
 import _shelld  # noqa: E402
+import sethu_hook  # noqa: E402
 
 
 class Base(unittest.TestCase):
@@ -79,6 +80,30 @@ class TestReadonlyFn(unittest.TestCase):
         for c in ["sort f", "sort -r f", "sort -n f", "xxd f", "date",
                   "git diff", "git show HEAD", "find . -follow", "find . -name x"]:
             self.assertTrue(_engine.is_readonly_safe(c), c)
+
+
+class TestHookGate(Base):
+    """The cheap prefix/`sethu` gate in sethu_hook that decides, without importing
+    the engine, whether a prompt could be for sethu."""
+    def test_is_sethu_command(self):
+        S = _engine.SUBCOMMANDS
+        self.assertTrue(sethu_hook.is_sethu_command("sethu", S))
+        self.assertTrue(sethu_hook.is_sethu_command("sethu --mode shell", S))
+        self.assertTrue(sethu_hook.is_sethu_command("sethu mode shell", S))
+        self.assertFalse(sethu_hook.is_sethu_command("sethu is great", S))
+        self.assertFalse(sethu_hook.is_sethu_command("tell me about sethu", S))
+
+    def test_maybe_sethu_default_prefix(self):
+        self.write()  # default prefix ">"
+        self.assertTrue(sethu_hook._maybe_sethu("> ls"))
+        self.assertTrue(sethu_hook._maybe_sethu("   > ls"))     # leading space
+        self.assertTrue(sethu_hook._maybe_sethu("sethu --runner"))
+        self.assertFalse(sethu_hook._maybe_sethu("just a normal message"))
+
+    def test_maybe_sethu_custom_prefix(self):
+        self.write(prefix="!!")
+        self.assertTrue(sethu_hook._maybe_sethu("!! ls"))
+        self.assertFalse(sethu_hook._maybe_sethu("regular text"))
 
 
 class TestInteractiveFn(unittest.TestCase):
@@ -292,10 +317,6 @@ class TestColor(Base):
 
 
 class TestTruncate(Base):
-    def _big(self, n):
-        # `seq N` prints 1..N, one per line — a cheap large output.
-        return "; ".join(["seq %d" % n])
-
     def test_long_output_truncated_with_pointer(self):
         self.write(allow=["seq"], maxLines=10, color=False)
         r = self.proc("> seq 100", sid="trunc1")["block"]

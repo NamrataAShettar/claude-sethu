@@ -55,11 +55,11 @@ def main():
 
     # On failure, surface error-looking lines that are above the tail window.
     if p.returncode != 0 and hidden:
-        flagged = [l for l in hidden if ERRORish.search(l)][-5:]
+        flagged = [line for line in hidden if ERRORish.search(line)][-5:]
         if flagged:
             print("… error lines from above:")
-            for l in flagged:
-                print(l)
+            for line in flagged:
+                print(line)
             print("…")
 
     if tail:

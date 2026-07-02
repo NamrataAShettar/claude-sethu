@@ -25,6 +25,9 @@ def _maybe_sethu(prompt):
     """Cheap gate: could this prompt be for sethu? Uses only json/os so a normal
     message returns fast without importing the engine. The default prefix is `>`;
     a custom prefix is read from config (still no _engine import)."""
+    # The literal ">" mirrors _engine.DEFAULTS["prefix"] — kept here (not imported)
+    # so the common non-sethu prompt never pays for importing the engine. If the
+    # default prefix ever changes in DEFAULTS, update it here too.
     s = prompt.lstrip()
     if s.startswith("sethu") or s.startswith(">"):
         return True
