@@ -696,23 +696,22 @@ def _why_refused(cmd, cfg):
     if prog == "git":
         sub = toks[1] if len(toks) > 1 else ""
         if sub and sub not in READONLY_GIT:
-            return (f"In read-only mode, `git {sub}` can also change the repo, so "
-                    f"it isn't auto-allowed (read-only git is status/log/diff/show/"
-                    f"blame/…).")
+            return (f"`git {sub}` can change the repo, so read-only mode doesn't run "
+                    f"it automatically (read-only git is status/log/diff/show/blame/…).")
     if prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
-        return (f"In read-only mode, `{prog}` is read-only but a flag here writes a "
-                f"file, so it isn't auto-allowed. Drop that flag to run it read-only "
-                f"(its output prints for free), or allow the writing form below.")
+        return (f"`{prog}` is read-only, but this flag writes a file, so read-only "
+                f"mode won't run it automatically. Drop the flag to run it read-only "
+                f"(the output just prints, for free), or allow it as-is below.")
     if prog == "find" and any(t in _FIND_WRITE_PRIMARIES for t in toks):
-        return ("In read-only mode, this `find` action writes or runs a command, so "
-                "it isn't auto-allowed.")
+        return ("This `find` action writes or runs a command, so read-only mode "
+                "won't run it automatically.")
     if _DANGER.search(cmd):
-        return ("Read-only mode refuses redirection, chaining (`;`, `&&`, `&`), and "
-                "command substitution for safety. Run the parts as separate `>` "
-                "commands, or allow the exact command below.")
+        return ("For safety, read-only mode won't run commands joined by `;`, `&&`, "
+                "`&`, or `|`, redirects (`>`), or `$(…)`. Run the parts as separate "
+                "`>` commands, or allow the exact command below.")
     if prog not in READONLY:
-        return (f"`{prog}` isn't in the read-only command set, so it isn't "
-                f"auto-allowed in read-only mode.")
+        return (f"`{prog}` isn't a read-only command, so read-only mode won't run it "
+                f"automatically.")
     return ""
 
 

@@ -277,10 +277,10 @@ class TestRefusalMessages(Base):
     def test_refusal_explains_why_and_still_offers_allow(self):
         self.write(readonly=True, color=False)
         cases = {
-            "git branch": "can also change the repo",
+            "git branch": "change the repo",
             "sort -o out f": "writes a file",
-            "npm test": "isn't in the read-only command set",
-            "ls; rm -rf ~": "refuses redirection, chaining",
+            "npm test": "isn't a read-only command",
+            "ls; rm -rf ~": "joined by",
         }
         for cmd, why in cases.items():
             b = self.proc("> " + cmd)["block"]
@@ -293,7 +293,7 @@ class TestRefusalMessages(Base):
     def test_refusal_offers_safer_path_when_one_exists(self):
         # Where a read-only way exists, the message points to it (not only --allow).
         self.write(readonly=True, color=False)
-        self.assertIn("Drop that flag", self.proc("> sort -o out f")["block"])
+        self.assertIn("Drop the flag", self.proc("> sort -o out f")["block"])
         self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
 
 
