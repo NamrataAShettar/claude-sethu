@@ -290,6 +290,12 @@ class TestRefusalMessages(Base):
     def test_timeout_message_mentions_hook_budget(self):
         self.assertIn("hook budget", _engine._timeout_msg(20, "sleep 99"))
 
+    def test_refusal_offers_safer_path_when_one_exists(self):
+        # Where a read-only way exists, the message points to it (not only --allow).
+        self.write(readonly=True, color=False)
+        self.assertIn("Drop that flag", self.proc("> sort -o out f")["block"])
+        self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
+
 
 class TestTrust(Base):
     def test_trust_bypasses_allowlist(self):
