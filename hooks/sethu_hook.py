@@ -86,11 +86,10 @@ def main():
             argv = shlex.split(args)
         except ValueError:
             argv = args.split()
-        env = dict(os.environ, NO_COLOR="1")
         try:
             run = subprocess.run(
                 [sys.executable, ENGINE, *argv],
-                capture_output=True, text=True, timeout=15, env=env,
+                capture_output=True, text=True, timeout=15,
             )
             text = (run.stdout or "") + (("\n" + run.stderr) if run.stderr else "")
         except Exception as e:

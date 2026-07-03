@@ -889,13 +889,26 @@ def normalize_argv(argv):
     return argv
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse, but errors are branded and colored so they stand out (argparse's
+    default dumps a plain, monochrome usage wall that's hard to spot the error in).
+    Points at the menu instead of re-printing every flag."""
+    def error(self, message):
+        on = _color_on(load_config())
+        sys.stderr.write(
+            _c(ICON, "tag", on) + " "
+            + _c(f"sethu: error: {message}", "fail", on) + "\n"
+            + _c("Run `sethu` for the options menu.", "dim", on) + "\n")
+        sys.exit(2)
+
+
 def main(argv=None):
     args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
     if not args_list:
         print(help_text())
         return
 
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="sethu", description="sethu: run terminal commands from Claude's prompt box",
         epilog=help_text(), formatter_class=argparse.RawDescriptionHelpFormatter,
     )

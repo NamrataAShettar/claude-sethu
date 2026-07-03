@@ -33,6 +33,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --restart                              TestManagementCLI, TestKillDaemons     [x]
   --runner / --show (config)             TestManagementCLI, TestHookOutput      [x]
   bare `sethu` (help menu)               TestManagementCLI                      [x]
+  branded/colored CLI errors             TestManagementCLI                      [x]
   subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
   interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
                                          TestRefusalMessages
@@ -262,6 +263,19 @@ class TestManagementCLI(Base):
 
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))
+
+    def test_bad_arg_error_is_branded(self):
+        # A bad flag gives a branded, concise error (icon + 'error:' + menu
+        # pointer), not argparse's plain usage wall.
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit):
+            _engine.main(["--mode", "nope"])
+        err = buf.getvalue()
+        self.assertIn(_engine.ICON, err)
+        self.assertIn("sethu: error:", err)
+        self.assertIn("options menu", err)
 
 
 class TestRefusalMessages(Base):
