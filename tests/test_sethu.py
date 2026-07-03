@@ -1,8 +1,54 @@
 #!/usr/bin/env python3
-"""Tests for sethu's engine. Stdlib only — run with:
+"""Tests for sethu's engine. Stdlib only. Run with:
 
     python3 -m unittest discover -s tests -v
     # or: python3 tests/test_sethu.py
+
+COVERAGE TABLE. Every feature and CLI argument maps to a test. When you add a
+feature or argument, add a row here, write its test, and tick it. Keep in sync.
+
+  Feature / CLI arg                      Test class(es)                        Done
+  -------------------------------------  ------------------------------------  ----
+  > cmd (run, block from model)          TestRunner, TestSafety                 [x]
+  >> cmd (run + send to Claude)          TestRunner, TestHookOutput             [x]
+  passthrough (non-sethu prompt)         TestRunner, TestLeadingWhitespace,     [x]
+                                         TestHookOutput
+  prefix only triggers at line start     TestLeadingWhitespace                  [x]
+  --allow                                TestConfig, TestSafety,                [x]
+                                         TestRefusalMessages
+  --unallow                              TestConfig                             [x]
+  --launch / --unlaunch                  TestLaunch, TestConfig                 [x]
+  --mode stateless/cwd/shell             TestModeSwitching, TestCwdMode,        [x]
+                                         TestShellMode
+  --readonly on/off                      TestReadonlyFn, TestSafety,            [x]
+                                         TestConfig, TestTrust
+  --trust on/off                         TestTrust                              [x]
+  --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
+  state builtins hint at shell mode      TestStateBuiltinHint                   [x]
+  --color on/off                         TestColor, TestConfig                  [x]
+  --maxlines (truncation)                TestTruncate, TestConfig               [x]
+  --timeout                              TestTimeout, TestConfig                [x]
+  --prefix (custom trigger)              TestCustomPrefix, TestConfig,          [x]
+                                         TestHookGate
+  --restart                              TestManagementCLI, TestKillDaemons     [x]
+  --runner / --show (config)             TestManagementCLI, TestHookOutput      [x]
+  bare `sethu` (help menu)               TestManagementCLI                      [x]
+  subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
+  interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
+                                         TestRefusalMessages
+  readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
+  refusal messages explain why           TestRefusalMessages                    [x]
+  timeout message cites hook budget      TestRefusalMessages                    [x]
+  long-output truncation + temp file     TestTruncate                           [x]
+  temp-file sweep                        TestSweep                              [x]
+  socket path + 0600 perms               TestSocketPath, TestSocketPerms        [x]
+  kill / reap shell daemons              TestKillDaemons                        [x]
+  first-run welcome hint                 TestFirstRunHint                       [x]
+  hook fast-path gate                    TestHookGate                           [x]
+  hook output JSON shapes                TestHookOutput                         [x]
+  python3-missing shim (run.sh)          TestPython3Shim                        [x]
+  icon constant                          TestIcon                               [x]
+  every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
 """
 import json
 import os
@@ -189,6 +235,66 @@ class TestSafety(Base):
         for c in ["git config user.name hacked", "git stash", "git branch -D main",
                   "git tag -d v1", "git remote add evil url"]:
             self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+
+
+class TestManagementCLI(Base):
+    """Management args whose *execution* path (not just argv normalization) needs
+    coverage: bare help, --runner/--show, --restart."""
+    def _out(self, argv):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _engine.main(argv)
+        return buf.getvalue()
+
+    def test_bare_prints_help_menu(self):
+        out = self._out([])
+        for t in ["sethu:", "> <cmd>", ">> <cmd>", "When to use what", "--allow",
+                  "--launch"]:
+            self.assertIn(t, out, t)
+
+    def test_runner_and_show_print_config(self):
+        for flag in (["--runner"], ["--show"]):
+            out = self._out(flag)
+            self.assertIn("mode:", out, flag)
+            self.assertIn("default", out, flag)   # shows each field's default
+
+    def test_restart_reports(self):
+        self.assertIn("restarted", self._out(["--restart"]))
+
+
+class TestRefusalMessages(Base):
+    def test_interactive_leads_with_launch_not_allow(self):
+        # Interactive commands point to --launch (allowlisting can't make them run).
+        self.write(readonly=True, color=False)
+        for c in ["vim", "python3", "top"]:
+            b = self.proc("> " + c)["block"]
+            self.assertIn("--launch", b, c)
+            self.assertIn("interactive", b, c)
+            self.assertNotIn('sethu --allow', b, c)   # allow is futile here
+
+    def test_refusal_explains_why_and_still_offers_allow(self):
+        self.write(readonly=True, color=False)
+        cases = {
+            "git branch": "change the repo",
+            "sort -o out f": "writes a file",
+            "npm test": "isn't a read-only command",
+            "ls; rm -rf ~": "joined by",
+        }
+        for cmd, why in cases.items():
+            b = self.proc("> " + cmd)["block"]
+            self.assertIn(why, b, cmd)
+            self.assertIn('sethu --allow', b, cmd)   # still offered (user's call)
+
+    def test_timeout_message_mentions_hook_budget(self):
+        self.assertIn("hook budget", _engine._timeout_msg(20, "sleep 99"))
+
+    def test_refusal_offers_safer_path_when_one_exists(self):
+        # Where a read-only way exists, the message points to it (not only --allow).
+        self.write(readonly=True, color=False)
+        self.assertIn("Drop the flag", self.proc("> sort -o out f")["block"])
+        self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
 
 
 class TestTrust(Base):
@@ -526,6 +632,42 @@ class TestShellMode(Base):
         self.assertNotIn("path too long", r["block"])
 
 
+class TestStateBuiltinHint(Base):
+    def test_state_builtin_in_nonshell_hints_shell_mode(self):
+        # export/source/alias/… only persist in shell mode; cwd/stateless should
+        # proactively point there instead of silently no-op'ing or refusing.
+        for m in ("cwd", "stateless"):
+            self.write(mode=m, readonly=True, color=False)
+            for c in ["export FOO=1", "source venv/bin/activate", "alias g=git",
+                      ". env/bin/activate", "unset PATHX"]:
+                b = self.proc("> " + c)["block"]
+                self.assertIn("shell mode", b, f"{m}: {c}")
+                self.assertIn("--mode shell", b, f"{m}: {c}")
+
+
+class TestRcAliases(Base):
+    def test_alias_and_env_from_rc_work_in_shell_mode(self):
+        # With --rc on, an alias AND an exported var from the shell rc are usable
+        # via `>` in shell mode (the daemon runs $SHELL and sources its rc).
+        home = tempfile.mkdtemp()
+        with open(os.path.join(home, ".bashrc"), "w") as f:
+            f.write("alias greet='echo ALIAS_OK'\nexport RCVAR=rc_env_ok\n")
+        sid = "test-rc-alias"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", rc=True, allow=["greet", "echo"], color=False)
+        saved = {k: os.environ.get(k) for k in ("HOME", "SHELL")}
+        os.environ["HOME"] = home
+        os.environ["SHELL"] = "/bin/bash"
+        try:
+            alias_out = self.proc("> greet", sid=sid)["block"]
+            env_out = self.proc("> echo $RCVAR", sid=sid)["block"]
+        finally:
+            for k, v in saved.items():
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+        self.assertIn("ALIAS_OK", alias_out)    # alias from rc ran
+        self.assertIn("rc_env_ok", env_out)     # exported var from rc is set
+
+
 class TestTimeout(Base):
     def setUp(self):
         super().setUp()
@@ -538,7 +680,7 @@ class TestTimeout(Base):
     def test_cwd_timeout_points_to_launch(self):
         self.write(allow=["sleep"], color=False)
         r = self.proc("> sleep 5")["block"]
-        self.assertIn("timed out (2s)", r)
+        self.assertIn("timed out after 2s", r)
         self.assertIn("--launch", r)
 
     def test_config_timeout_used(self):
@@ -548,7 +690,7 @@ class TestTimeout(Base):
         cfg = _engine.load_config()
         self.assertEqual(_engine.cmd_timeout(cfg), 1)
         r = self.proc("> sleep 5")["block"]
-        self.assertIn("timed out (1s)", r)
+        self.assertIn("timed out after 1s", r)
 
     def test_env_overrides_config_timeout(self):
         self.write(timeout=99)
@@ -566,7 +708,7 @@ class TestTimeout(Base):
         self.addCleanup(self._shutdown, sid)
         self.write(mode="shell", allow=["sleep", "echo"], color=False)
         r = self.proc("> sleep 5", sid=sid)["block"]
-        self.assertIn("timed out (2s)", r)
+        self.assertIn("timed out after 2s", r)
         # The shell must recover — the stuck command was interrupted, so the next
         # command runs normally instead of hanging behind it.
         r2 = self.proc("> echo alive", sid=sid)["block"]
@@ -782,11 +924,23 @@ class TestPython3Shim(unittest.TestCase):
         json.loads(r.stdout)  # must be valid JSON
 
     def test_missing_python3_prompt_is_silent(self):
-        # No python3 → a prompt passes through silently (typing still works).
+        # No python3 → a NORMAL prompt passes through silently (typing still works).
         r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
                       stdin='{"prompt":"hello"}')
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
+
+    def test_missing_python3_sethu_prompt_warns(self):
+        # No python3 → a SETHU-looking prompt (> … / sethu …) is blocked with the
+        # install guidance, so it doesn't silently do nothing (or leak to Claude).
+        for prompt in ('{"prompt":"> ls"}', '{"prompt":"  > ls"}',
+                       '{"prompt":"sethu --runner"}'):
+            r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
+                          stdin=prompt)
+            self.assertEqual(r.returncode, 0, prompt)
+            out = json.loads(r.stdout)               # valid JSON
+            self.assertEqual(out["decision"], "block", prompt)
+            self.assertIn("python3", out["reason"], prompt)
 
     def test_present_python3_runs_hook(self):
         # With python3, the shim execs it — session_start emits the first-run
@@ -796,6 +950,23 @@ class TestPython3Shim(unittest.TestCase):
         r = self._run("session", "session_start.py", env)
         self.assertEqual(r.returncode, 0)
         self.assertIn("sethu is installed", r.stdout)
+
+
+class TestCoverageEnforcement(unittest.TestCase):
+    """Self-enforcing coverage: every CLI argument the engine defines must be
+    referenced somewhere in this test file. Add a flag without a test and CI goes
+    red — no reliance on anyone remembering to update the coverage table by hand.
+    (This is a presence check, not proof of assertion quality; pair with a real
+    test for the flag's behavior.)"""
+    def test_every_cli_arg_is_referenced_in_tests(self):
+        import re
+        engine = open(_engine.__file__).read()
+        tests = open(__file__).read()
+        calls = re.findall(r"add_argument\((.*?)\)", engine, re.DOTALL)
+        args = {opt for body in calls for opt in re.findall(r'"(--[a-z]+)"', body)}
+        self.assertTrue(args, "no CLI args discovered — regex likely broke")
+        missing = sorted(a for a in args if a not in tests)
+        self.assertEqual(missing, [], f"CLI args with no test reference: {missing}")
 
 
 if __name__ == "__main__":

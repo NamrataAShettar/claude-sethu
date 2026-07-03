@@ -94,12 +94,15 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `> cmd` | run it, show **you** the output (free) |
 | `>> cmd` | run it and **send output to Claude** (costs tokens) |
 | `sethu --allow "cmd"` | permit a writing command (read-only ones already work) |
+| `sethu --unallow "cmd"` | remove a command from the allowlist |
 | `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
-| `sethu --mode shell` | persistent shell (`cd`/`export`/venv stick) |
-| `sethu --timeout 60` | give commands up to 60s |
 | `sethu --readonly off` | stop auto-allowing read-only commands |
 | `sethu --trust on` | ⚠ run **anything**, no allowlist (footgun) |
-| `sethu --runner` | show the current config |
+| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
+| `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
+| `sethu --restart` | restart the persistent shell (clears shell-mode state) |
+| `sethu --timeout 60` | give commands up to 60s |
+| `sethu --runner` | show the current config (with defaults) |
 
 Config lives in `~/.claude/sethu.json`.
 
@@ -181,6 +184,33 @@ to do instead:
 
 ---
 
+## 🛟 Troubleshooting
+
+**"UserPromptSubmit operation blocked by hook:" shows before my output.** That's
+normal, and it means it worked. Claude Code prints that wrapper around any prompt a
+hook handles locally; it's how sethu keeps your command out of the model. The
+`|^=^| [mode] ✓ exit 0` line below it is your actual result.
+
+**I typed `> cmd` but nothing ran, or Claude answered it instead.** You typed it
+while Claude was still generating. sethu only fires on a prompt that *starts* a
+turn, so a `>` typed mid-response is read by the model (and costs tokens), not run
+by sethu. Send `> cmd` when Claude is idle.
+
+**"`X` isn't allowed to run."** sethu is read-only by default. The message tells you
+why (e.g. `git branch` can also write, `npm` isn't a read-only command). To permit
+it, `sethu --allow "X"`. If it's interactive (`vim`, a bare REPL), use
+`sethu --launch "X"` instead (allowlisting can't make those run). To drop the
+guardrails entirely and run anything, there's `sethu --trust on`, but it's a
+footgun, so prefer allowlisting the specific commands you actually want.
+
+**"timed out after 20s."** Captured commands are capped under Claude Code's ~30s
+hook budget. Raise it a bit with `sethu --timeout`, or run long-lived commands
+(servers, `tail -f`) in a real terminal with `sethu --launch`.
+
+Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/issues).
+
+---
+
 ## 🧩 Extras
 
 <details>
@@ -224,7 +254,7 @@ reports, ideas, and "this was confusing" notes are all genuinely welcome.
 
 ---
 
-## 🧪 Tests & contributing
+## 🧪 Tests
 
 Stdlib only, no dependencies:
 
@@ -234,7 +264,9 @@ python3 -m unittest discover -s tests -v
 
 The suite covers the allowlist, read-only safety (injection and chaining refused),
 the interactive guard, all three modes (including the persistent shell), the `>>`
-pipe, and config round-trips. CI runs them on every push and PR. PRs welcome.
+pipe, and config round-trips. Every feature and CLI argument maps to a test (a
+coverage table at the top of `tests/test_sethu.py`, guarded by a meta-test that
+fails if any argument is untested). CI runs them on every push and PR.
 
 ## ℹ️ About Claude Code
 
