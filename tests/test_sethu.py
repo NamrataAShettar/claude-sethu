@@ -250,8 +250,8 @@ class TestManagementCLI(Base):
 
     def test_bare_prints_help_menu(self):
         out = self._out([])
-        for t in ["sethu:", "> <cmd>", ">> <cmd>", "When to use what", "--allow",
-                  "--launch"]:
+        for t in ["sethu:", "> cmd", ">> cmd", "--allow", "--launch", "--runner",
+                  "Read-only by default"]:
             self.assertIn(t, out, t)
 
     def test_runner_and_show_print_config(self):

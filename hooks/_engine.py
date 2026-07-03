@@ -844,43 +844,30 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""{ICON} sethu: run terminal commands from Claude's prompt box.
+    return f"""{ICON} sethu: run terminal commands from Claude's prompt box (no `!` needed).
 
-In the prompt (no `!` needed, costs zero tokens):
-  > <cmd>        run a command; output shown to you, model blocked (free)
-  >> <cmd>       run it AND send the output to Claude (this costs tokens)
+  > cmd      run it, show the output to YOU only. Free (Claude never sees it).
+  >> cmd     run it AND send the output to Claude (this costs tokens).
 
-When to use what:
-  > cmd                 just inspect something yourself. Free, stays out of context.
-  >> cmd                you want Claude to act on the output (costs tokens)
-  --allow "<cmd>"       permit a writing/other command (read-only ones already work)
-  --launch  <cmd>       interactive (vim, top, ssh) or long-running. --allow can't
-                        help those; this pops a real terminal
-  --readonly off        stop auto-running read-only commands (allow nothing unlisted)
-  --mode shell          you need cd / export / venv to persist across commands
-  --trust on            you want > to run anything, no guardrails (footgun)
+Let a command run (read-only ones like ls / cat / git log run already):
+  sethu --allow "cmd"      permit a command that writes or isn't read-only (undo: --unallow)
+  sethu --launch "cmd"     interactive (vim/top/ssh) or long-running: opens a terminal (undo: --unlaunch)
+  sethu --readonly off     stop auto-running read-only commands
+  sethu --trust on         run ANY `>` command, no allowlist (footgun)
 
-Manage it (type `sethu …` in the prompt or a terminal):
-  sethu                      show this help
-  sethu --runner             show current config
-  sethu --allow "<cmd>"      allow a command      sethu --unallow "<cmd>"
-  sethu --launch "<cmd>"     open in a terminal   sethu --unlaunch "<cmd>"
-  sethu --readonly on        auto-allow read-only commands (ls, cat, git log…)
-  sethu --trust on           bypass the allowlist — run ANY command (footgun)
-  sethu --mode {'|'.join(MODES)}
-  sethu --rc on              shell mode: source your shell rc (aliases/functions/env)
-  sethu --color off          turn off the colored result header (or NO_COLOR=1)
-  sethu --maxlines 40        cap long output (full output saved to a file); 0 = unlimited
-  sethu --timeout 20         seconds a command may run before it times out
-  sethu --restart            restart the persistent shell(s) (clear shell state)
-  sethu --prefix ">"         change the trigger
-  sethu --help               full flag reference
+How commands run:
+  sethu --mode {'|'.join(MODES)}   default cwd; shell makes cd/export/venv persist
+  sethu --rc on            shell mode: load your aliases / functions / env
+  sethu --restart          restart the persistent shell
+  sethu --timeout 20       seconds a command may run before timing out
+  sethu --maxlines 40      cap long output (0 = unlimited)
+  sethu --prefix ">"       change the trigger
+  sethu --color off        plain result header (or NO_COLOR=1)
 
-Modes: stateless (no state) · cwd (cd persists — default) · shell (cd/export/venv persist)
-Safety: read-only mode is ON by default — inspection commands (ls, cat, git log…)
-  run; writes/chaining are refused. `--allow` adds specific commands; `--readonly
-  off` turns the auto-allow off; `--trust on` removes all guardrails (footgun).
-Config: {config_path()}   (now: mode={cfg['mode']}, readonly={'on' if cfg.get('readonly') else 'off'}, {len(cfg['allow'])} allowed)"""
+  sethu --runner           show the full config with defaults
+
+Read-only by default: inspection runs free, writes need --allow.
+Config: {config_path()}   now: mode={cfg['mode']}, readonly={'on' if cfg.get('readonly') else 'off'}, {len(cfg['allow'])} allowed"""
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",

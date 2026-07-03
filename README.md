@@ -79,8 +79,8 @@ Inside a Claude Code session:
 That's it. Read-only commands like `> ls` work immediately. To write, allowlist
 the command: `sethu --allow "npm test"`.
 
-(You manage sethu right in the prompt box: type bare `sethu` for the options menu
-with a "when to use what" guide. No terminal setup needed.)
+(You manage sethu right in the prompt box: type bare `sethu` for the options menu.
+No terminal setup needed.)
 
 ---
 
