@@ -47,9 +47,17 @@ can't both hold that name at once. Pick an option by what you're doing:
 | **B. `--plugin-dir` flag** | your **live local files** | **none** (per session; just relaunch without it) | a quick, throwaway test of local changes |
 | **C. branch URL** | the **pushed** branch (a snapshot) | swap + restore, like A | reviewing a pushed PR branch as-is |
 
-Substitute your own checkout path for `/path/to/claude-sethu` below. The `/plugin …`
-lines are in-session slash commands; the same works from a terminal as
-`claude plugin …` (e.g. `claude plugin marketplace add`).
+Substitute your own checkout path for `/path/to/claude-sethu` below.
+
+**Where each command runs — this matters:**
+- ` ```bash ` blocks (`git …`, `claude …`, `python3 …`) run in your **normal
+  terminal / shell**.
+- Lines starting with `/` (`/plugin …`, `/reload-plugins`) are typed in the
+  **Claude Code prompt**. (They also work from a terminal as `claude plugin …`.)
+- **Do NOT prefix a terminal command with sethu's `>` (or `!`).** That runs it
+  *through* sethu's captured runner, which garbles interactive full-screen programs
+  — including `claude` itself. `claude --plugin-dir …` in particular must be run at
+  a plain shell prompt, not in a sethu prompt.
 
 ### Option A: local marketplace (persistent local dev)
 
@@ -72,16 +80,20 @@ lines are in-session slash commands; the same works from a terminal as
 ### Option B: `--plugin-dir` launch flag (quick throwaway, no cleanup)
 
 A `--plugin-dir` copy overrides the installed plugin for that session only, so
-there's nothing to remove/add and **nothing to undo**. Check out the branch you
-want, then start Claude Code with the flag:
+there's nothing to remove/add and **nothing to undo**. In a **plain terminal**
+(not a sethu prompt — this launches a whole new Claude Code session), check out the
+branch you want and start Claude Code with the flag:
 
 ```bash
 git checkout <branch>
 claude --plugin-dir /path/to/claude-sethu
 ```
 
-Switch branches during the session with `git checkout <branch>` + `/reload-plugins`.
-To go back to the released plugin, just exit and start `claude` normally next time.
+That opens a fresh session with the local plugin loaded (no `/reload-plugins`
+needed at startup). Inside it, type `> ls` to see your changes. Switch branches
+mid-session with `git checkout <branch>` in a terminal + `/reload-plugins` in the
+prompt. To go back to the released plugin, just exit and start `claude` normally
+next time.
 
 ### Option C: branch URL (review a pushed PR)
 
