@@ -118,7 +118,9 @@ def _sweep_temp(now, force=False):
     `now` is passed in (time.time()) so it's testable. Throttled to ~once an hour
     via a sentinel file, since scanning the temp dir on every command is wasteful
     for a 7-day GC (cost scales with temp-dir size, not sethu's file count).
-    Sockets are left alone — the daemon manages their lifecycle."""
+    A live daemon manages its own socket, but a SIGKILL'd one leaves the socket
+    file behind; anything 7+ days old is certainly dead (far past the 30-min idle
+    timeout), so it's swept too."""
     tmp = tempfile.gettempdir()
     sentinel = os.path.join(tmp, "sethu-swept")
     if not force:
@@ -142,7 +144,8 @@ def _sweep_temp(now, force=False):
     for e in entries:
         n = e.name
         if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
-                (n.startswith("sethu-launch-") and n.endswith(".command"))):
+                (n.startswith("sethu-launch-") and n.endswith(".command")) or
+                (n.startswith("sethu-") and n.endswith(".sock"))):
             continue
         try:
             if now - e.stat().st_mtime > _TEMP_MAX_AGE:
@@ -216,21 +219,39 @@ def first_run_hint():
         os.makedirs(os.path.dirname(marker), exist_ok=True)
         open(marker, "w").close()
     except Exception:
-        pass
+        # Can't record that we showed it → skip, so a read-only config dir doesn't
+        # get the "once per machine" hint on every single session.
+        return None
     return {"systemMessage": FIRST_RUN_HINT}
+
+
+def _type_ok(default, v):
+    """True if a user-config value `v` is compatible with its DEFAULTS type, so a
+    hand-edited config (e.g. `"allow": "ls"`) can't crash callers that index or
+    append. bool is checked before int (bool is a subclass of int)."""
+    if isinstance(default, bool):
+        return isinstance(v, bool)
+    if isinstance(default, list):
+        return isinstance(v, list)
+    if isinstance(default, int):
+        return isinstance(v, int) and not isinstance(v, bool)
+    if isinstance(default, str):
+        return isinstance(v, str)
+    return True
 
 
 def load_config():
     """Return the effective config: DEFAULTS overlaid with any keys present in
     the user's config file. Every DEFAULTS key is guaranteed present (so callers
-    can index directly). A missing or malformed file falls back to DEFAULTS."""
+    can index directly). A missing or malformed file, or a wrongly-typed value,
+    falls back to the DEFAULTS entry for that key."""
     cfg = {k: (list(v) if isinstance(v, list) else v) for k, v in DEFAULTS.items()}
     try:
         with open(config_path()) as f:
             user = json.load(f)
         if isinstance(user, dict):
-            for k in DEFAULTS:
-                if k in user:
+            for k, default in DEFAULTS.items():
+                if k in user and _type_ok(default, user[k]):
                     cfg[k] = user[k]
     except Exception:
         pass

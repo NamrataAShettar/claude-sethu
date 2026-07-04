@@ -50,6 +50,10 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   python3-missing shim (run.sh)          TestPython3Shim                        [x]
   icon constant                          TestIcon                               [x]
   every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
+  malformed config falls back per key    TestConfig                             [x]
+  unterminated-quote command refused     TestHookOutput                         [x]
+  first-run hint skips if unwritable     TestFirstRunHint                       [x]
+  orphaned socket swept when stale       TestSweep                              [x]
 """
 import json
 import os
@@ -499,19 +503,22 @@ class TestSweep(unittest.TestCase):
         tmp = _tf.gettempdir()
         old = os.path.join(tmp, "sethu-out-deadbeef0001.log")
         cmd = os.path.join(tmp, "sethu-launch-deadbeef0002.command")
+        sock = os.path.join(tmp, "sethu-deadbeef0004-p0.sock")   # orphaned socket
         fresh = os.path.join(tmp, "sethu-out-deadbeef0003.log")
-        for p in (old, cmd, fresh):
+        for p in (old, cmd, sock, fresh):
             open(p, "w").close()
         self.addCleanup(lambda: [os.path.exists(p) and os.unlink(p)
-                                 for p in (old, cmd, fresh)])
+                                 for p in (old, cmd, sock, fresh)])
         now = os.path.getmtime(fresh) + 100
-        # Backdate two files well past the max age.
+        # Backdate the stale files well past the max age.
         stale = now - _engine._TEMP_MAX_AGE - 1000
         os.utime(old, (stale, stale))
         os.utime(cmd, (stale, stale))
+        os.utime(sock, (stale, stale))
         _engine._sweep_temp(now, force=True)   # bypass the once-an-hour throttle
         self.assertFalse(os.path.exists(old), "stale .log should be swept")
         self.assertFalse(os.path.exists(cmd), "stale .command should be swept")
+        self.assertFalse(os.path.exists(sock), "stale orphaned .sock should be swept")
         self.assertTrue(os.path.exists(fresh), "fresh file must be kept")
 
     def test_sweep_throttled(self):
@@ -798,6 +805,19 @@ class TestFirstRunHint(Base):
         self.assertEqual(os.path.dirname(_engine._welcome_marker()),
                          os.path.dirname(_engine.config_path()))
 
+    def test_skips_hint_when_marker_unwritable(self):
+        # If the marker can't be persisted, don't nudge (else it repeats every
+        # session on a read-only config dir).
+        f = tempfile.NamedTemporaryFile(delete=False)
+        f.close()
+        os.environ["SETHU_CONFIG"] = os.path.join(f.name, "sub", "sethu.json")
+        try:
+            self.assertIsNone(_engine.first_run_hint())
+            self.assertIsNone(_engine.first_run_hint())   # still silent, not spam
+        finally:
+            os.environ["SETHU_CONFIG"] = self.cfg
+            os.unlink(f.name)
+
 
 class TestConfig(Base):
     def test_defaults_when_missing(self):
@@ -835,6 +855,29 @@ class TestConfig(Base):
         self.assertEqual(_engine.max_lines({}), 40)
         self.assertEqual(_engine.max_lines({"maxLines": 0}), 0)      # unlimited
         self.assertEqual(_engine.max_lines({"maxLines": 100}), 100)
+
+    def test_malformed_config_types_fall_back(self):
+        # A hand-edited config with wrongly-typed values falls back per key
+        # instead of crashing callers that index/append.
+        with open(self.cfg, "w") as f:
+            json.dump({"allow": "ls", "launch": 5, "readonly": "off",
+                       "prefix": 9, "mode": ["x"]}, f)
+        c = _engine.load_config()
+        self.assertEqual(c["allow"], [])       # non-list -> default []
+        self.assertEqual(c["launch"], [])
+        self.assertIs(c["readonly"], True)     # "off" (str) isn't a bool -> default
+        self.assertEqual(c["prefix"], ">")     # non-str -> default
+        self.assertEqual(c["mode"], "cwd")     # non-str -> default
+
+    def test_allow_survives_malformed_config(self):
+        # The CLI mutation path must not crash when the on-disk list is malformed.
+        import io
+        import contextlib
+        with open(self.cfg, "w") as f:
+            json.dump({"allow": "ls"}, f)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _engine.main(["--allow", "foo"])   # previously AttributeError
+        self.assertIn("foo", _engine.load_config()["allow"])
 
     def test_setter_flags_roundtrip(self):
         # The management CLI persists each config-setter flag.
@@ -898,6 +941,14 @@ class TestHookOutput(Base):
         r = self._run("just a normal message to claude")
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
+
+    def test_unterminated_quote_is_refused(self):
+        # `sethu allow "oops` (unbalanced quote) must refuse, not persist garbage.
+        self.write()
+        out = json.loads(self._run('sethu allow "oops').stdout)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("quotes", out["reason"])
+        self.assertNotIn('"oops', _engine.load_config()["allow"])
 
     def test_run_command_emits_block(self):
         self.write(readonly=True)

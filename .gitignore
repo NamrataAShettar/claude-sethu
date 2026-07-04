@@ -5,3 +5,4 @@ __pycache__/
 # Local-only planning/design notes (kept out of the repo for now)
 BACKLOG.md
 docs/during-ponder-execution.md
+BUG-BASH-*.md

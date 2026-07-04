@@ -75,7 +75,7 @@ def main():
 
     # It's (probably) for sethu — now pay for the heavier imports.
     sys.path.insert(0, HERE)
-    from _engine import process, SUBCOMMANDS  # noqa: E402
+    from _engine import process, SUBCOMMANDS, ICON  # noqa: E402
 
     # `sethu …` → run the management CLI locally, block the model.
     if is_sethu_command(prompt, SUBCOMMANDS):
@@ -85,7 +85,10 @@ def main():
         try:
             argv = shlex.split(args)
         except ValueError:
-            argv = args.split()
+            # Unbalanced quotes: refuse rather than run with a broken argv that
+            # would persist a garbage token (e.g. `sethu allow "oops`).
+            _block(f"{ICON} sethu: mismatched quotes in that command. "
+                   f"Check your quoting and try again.")
         try:
             run = subprocess.run(
                 [sys.executable, ENGINE, *argv],
