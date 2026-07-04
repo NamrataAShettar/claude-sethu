@@ -18,7 +18,10 @@ with one, either don't make it or update this doc deliberately.
   don't.
 - **Color = sethu's *interpretation*; plain = *relayed* content.** Color the things
   sethu understands and gives meaning to (exit status, mode, warnings). Never
-  recolor the command's own output — it's data sethu just carries.
+  recolor the command's own output — it's data sethu just carries. (But do append a
+  trailing `\033[0m` when the output contains ANSI, so a colour the command left
+  open doesn't bleed into the rest of the transcript — that's hygiene, not
+  recoloring.)
 - **Don't color routine messages.** Refusals and info (interactive, isn't-allowed,
   cd, state-builtin) are the branded icon + `·` separator + **plain body** — they're
   normal outcomes, not alarms. Reserve color for *status* (✓/✗ exit) and *genuine

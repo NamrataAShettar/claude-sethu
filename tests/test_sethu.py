@@ -303,6 +303,13 @@ class TestFullScreenTUI(Base):
         self.write(readonly=True, color=False)
         self.assertNotIn("full-screen program", self.proc("> ls")["block"])
 
+    def test_command_ansi_is_reset_to_prevent_bleed(self):
+        # A command that leaves a colour/attribute open gets a trailing reset so it
+        # doesn't bleed into the rest of the transcript. Plain output doesn't.
+        self.write(trust=True, readonly=False, color=False)
+        self.assertTrue(self.proc(r"> printf '\033[33mopen'")["block"].endswith("\x1b[0m"))
+        self.assertFalse(self.proc("> printf plain")["block"].endswith("\x1b[0m"))
+
 
 class TestRefusalMessages(Base):
     def test_interactive_leads_with_launch_not_allow(self):

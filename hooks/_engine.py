@@ -899,6 +899,11 @@ def process(prompt, data):
         body = f"{header}\n{hint}\n{shown}"
     if note:
         body += "\n" + _c(note, "dim", on)
+    if "\x1b" in shown:
+        # The command's own output may leave a color/attribute open (common when a
+        # TUI is captured mid-draw); close it so it doesn't bleed into the rest of
+        # the transcript. This resets state, it doesn't recolor the output.
+        body += "\033[0m"
     return {"block": body}
 
 
