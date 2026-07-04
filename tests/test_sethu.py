@@ -139,24 +139,27 @@ class TestReadonlyFn(unittest.TestCase):
             self.assertTrue(_engine.is_readonly_safe(c), c)
 
     def test_git_global_options_readonly(self):
-        # M2: a read-only git subcommand stays read-only behind leading globals.
-        for c in ["git -C /tmp status", "git --no-pager log", "git -p diff",
-                  "git --git-dir=/r/.git log", "git -C /tmp --no-pager show HEAD",
-                  "git --literal-pathspecs ls-files"]:
+        # M2: a read-only git subcommand stays read-only behind leading NON-
+        # retargeting globals (output/pathspec handling only).
+        for c in ["git --no-pager log", "git -p diff", "git --paginate show HEAD",
+                  "git --literal-pathspecs ls-files",
+                  "git --no-optional-locks --no-pager status"]:
             self.assertTrue(_engine.is_readonly_safe(c), c)
 
     def test_git_global_options_still_refuse_writes(self):
         # M2: globals must not smuggle a write subcommand past the gate…
-        for c in ["git -C /tmp push", "git --no-pager reset --hard",
-                  "git --git-dir=/r/.git commit -m x"]:
+        for c in ["git --no-pager reset --hard", "git -p push"]:
             self.assertFalse(_engine.is_readonly_safe(c), c)
 
     def test_git_exec_globals_refused(self):
-        # M2/security: -c / --config-env / --exec-path can run arbitrary code even
-        # in front of a read-only subcommand, so they're never read-only.
+        # M2/security: options that run code from config — retargeting (-C,
+        # --git-dir: a foreign repo's config execs on status/diff) or exec-capable
+        # (-c/--config-env/--exec-path) — are never auto-read-only, even in front
+        # of a read-only subcommand.
         for c in ["git -c core.pager=evil log", "git -c alias.x='!sh' status",
-                  "git --exec-path=/evil status",
-                  "git --config-env=core.pager=X log"]:
+                  "git --exec-path=/evil status", "git --config-env=core.pager=X log",
+                  "git -C /tmp status", "git --git-dir=/r/.git log",
+                  "git --work-tree=/r status", "git -C hostile diff"]:
             self.assertFalse(_engine.is_readonly_safe(c), c)
 
     def test_git_ext_diff_refused(self):
@@ -169,8 +172,10 @@ class TestReadonlyFn(unittest.TestCase):
         # M2: refusal reasons stay accurate through leading globals.
         cfg = {"readonly": True}
         self.assertIn("push", _engine._why_refused("git --no-pager push", cfg))
-        self.assertIn("arbitrary code",
-                      _engine._why_refused("git -c core.pager=x log", cfg))
+        # exec-capable and repo-retargeting globals share the "config can run
+        # programs" explanation.
+        for c in ("git -c core.pager=x log", "git -C /tmp status"):
+            self.assertIn("config can run", _engine._why_refused(c, cfg), c)
         self.assertIn("--ext-diff",
                       _engine._why_refused("git log --ext-diff", cfg))
 
@@ -377,6 +382,14 @@ class TestManagementCLI(Base):
         self._out(["--allow", "a   b"])                     # stored canonical
         cfg = _engine.load_config()
         self.assertEqual(cfg["allow"], ["a b"])
+        self.assertIn("✔ removed", self._out(["--unallow", "a b"]))
+        self.assertEqual(_engine.load_config()["allow"], [])
+
+    def test_legacy_multispace_entry_canonicalized_on_load(self):
+        # LOW-2: an entry stored raw (older version / hand-edit) with multiple
+        # spaces is canonicalized when loaded, so it's removable AND can match.
+        self.write(allow=["a   b"])
+        self.assertEqual(_engine.load_config()["allow"], ["a b"])
         self.assertIn("✔ removed", self._out(["--unallow", "a b"]))
         self.assertEqual(_engine.load_config()["allow"], [])
 
@@ -1261,7 +1274,8 @@ class TestPython3Shim(unittest.TestCase):
                        '{"prompt"  :  "> ls"}',              # space around colon
                        '{\n  "prompt": "> ls"\n}',           # pretty / multi-line
                        '{"prompt":"\\t> ls"}',               # JSON \t before >
-                       '{"other":"x",\n "prompt":"sethu x"}'):  # key not on line 1
+                       '{"other":"x",\n "prompt":"sethu x"}',   # key not on line 1
+                       '{"role":"prompt","prompt":"> ls"}'):  # decoy value == "prompt"
             r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
                           stdin=prompt)
             self.assertEqual(r.returncode, 0, prompt)

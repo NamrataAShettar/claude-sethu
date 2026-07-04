@@ -288,11 +288,13 @@ def load_config():
     except Exception:
         pass
     # Value-level normalization (beyond type), so a hand-edited config can't crash
-    # or misbehave: list entries must be strings (else `_matches` does str+int),
-    # mode must be a real mode, and the prefix can't be empty (which would match
-    # every prompt).
-    cfg["allow"] = [str(x) for x in cfg["allow"]]
-    cfg["launch"] = [str(x) for x in cfg["launch"]]
+    # or misbehave: list entries must be strings (else `_matches` does str+int) and
+    # are whitespace-canonicalized to match how --allow/--unallow store them (so an
+    # entry saved by an older version, or hand-edited with odd spacing, stays
+    # removable and can actually match a command); empties are dropped. Mode must be
+    # a real mode, and the prefix can't be empty (which would match every prompt).
+    cfg["allow"] = [c for c in (" ".join(str(x).split()) for x in cfg["allow"]) if c]
+    cfg["launch"] = [c for c in (" ".join(str(x).split()) for x in cfg["launch"]) if c]
     if cfg["mode"] not in MODES:
         cfg["mode"] = DEFAULTS["mode"]
     if not cfg["prefix"]:
@@ -496,24 +498,28 @@ READONLY_GIT = {
 _DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
-# git global options that may appear BEFORE the subcommand (`git -C x status`).
+# git global options safe to skip before the subcommand: they change output/
+# pathspec handling but do NOT retarget the repo or run code. Deliberately NOT
+# here: -C / --git-dir / --work-tree / --namespace point git at a DIFFERENT repo,
+# whose .git/config git then trusts and can run programs from (core.fsmonitor on
+# status/diff, diff.external/textconv on diff) with no command-line flag. So those
+# (like -c / --config-env / --exec-path) make the command not-read-only; a user who
+# trusts that repo can --allow it.
 _GIT_GLOBAL_NOARG = frozenset({
     "-p", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
     "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
     "--icase-pathspecs", "--no-optional-locks",
 })
-# globals that consume the next token as their value (also accept `--flag=value`).
-_GIT_GLOBAL_ARG = frozenset({"-C", "--git-dir", "--work-tree", "--namespace"})
 
 
 def _git_subcommand(toks):
-    """Resolve git's subcommand, skipping any leading global options so that
-    `git -C /x --no-pager status` is understood as `status`.
-    Returns (sub, safe): `sub` is the subcommand token ('' if none is present);
-    `safe` is False when an exec-capable global was seen — `-c key=value`,
-    `--config-env`, or `--exec-path` can run arbitrary code (`git -c core.pager=…`,
-    `-c alias.x='!sh' x`, `--exec-path=/evil sub`), and any unrecognized option is
-    treated the same way, so such a command is never read-only."""
+    """Resolve git's subcommand, skipping only the leading NO-ARG global options
+    that don't retarget the repo, so `git --no-pager status` is understood as
+    `status`. Returns (sub, safe): `sub` is the subcommand token ('' if none);
+    `safe` is False when ANY other option is seen before the subcommand — repo-
+    retargeting (`-C`, `--git-dir`, …) or exec-capable (`-c key=value`,
+    `--config-env`, `--exec-path`) globals and anything unrecognized can run
+    arbitrary code from config, so the command is never auto-read-only."""
     i = 1
     while i < len(toks):
         t = toks[i]
@@ -521,12 +527,8 @@ def _git_subcommand(toks):
             return (t, True)                       # the subcommand
         if t in _GIT_GLOBAL_NOARG:
             i += 1
-        elif t in _GIT_GLOBAL_ARG:
-            i += 2                                  # skip the flag and its value
-        elif any(t.startswith(f + "=") for f in _GIT_GLOBAL_ARG):
-            i += 1                                  # `--git-dir=…` (value attached)
         else:
-            return ("", False)                      # -c / --config-env / --exec-path / unknown
+            return ("", False)                      # retarget / exec / unknown → not read-only
     return ("", True)                               # ran out: no subcommand
 
 
@@ -825,9 +827,11 @@ def _why_refused(cmd, cfg):
     if prog == "git":
         sub, safe = _git_subcommand(toks)
         if not safe:
-            return ("that uses `git -c`, `--config-env`, or `--exec-path`, which can "
-                    "run arbitrary code, so read-only mode won't run it. Drop that "
-                    "option, or allow the exact command below.")
+            return ("read-only mode won't auto-run git with `-c`/`--config-env`/"
+                    "`--exec-path` or a repo-retargeting option (`-C`, `--git-dir`, "
+                    "`--work-tree`), because a repo's own config can run external "
+                    "programs even on `status`/`diff`. Allow the exact command below "
+                    "if you trust it.")
         if sub and sub not in READONLY_GIT:
             return (f"`git {sub}` can change the repo, so read-only mode doesn't run "
                     f"it automatically (read-only git is status/log/diff/show/blame/…).")
@@ -976,7 +980,7 @@ def process(prompt, data):
         summary = (f"shared {n} line{'s' if n != 1 else ''} with Claude"
                    if shown and shown != "(no output)"
                    else "ran it and shared the (empty) result with Claude")
-        confirm = f"{header}\n{summary} — this used tokens."
+        confirm = f"{header}\n{summary} (this used tokens)."
         return {"context": ctx, "note": confirm}
     body = f"{header}\n{shown}"
     if code != 0 and _looks_full_screen(out):
@@ -1069,9 +1073,9 @@ def readonly_list_text():
     names = textwrap.fill("  ".join(sorted(READONLY)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
     guards = (
-        "  sort -o/--output · xxd -r · date -s · find -exec/-delete/-fprint · "
+        "  sort -o/--output · xxd -r · date -s/--set · find -exec/-delete/… · "
         "git writes (push/commit/…) · git -c/--config-env/--exec-path · "
-        "git --ext-diff/--output"
+        "git -C/--git-dir (foreign repo) · git --ext-diff/--output"
     )
     return (
         "read-only mode runs these commands without asking (no --allow needed):\n\n"
@@ -1160,7 +1164,7 @@ def main(argv=None):
                 cfg["launch"].append(val)
             changed = True
             status = launch_in_terminal(val)
-            note = ("  Note: the launched terminal is a plain shell — it does NOT "
+            note = ("  Note: the launched terminal is a plain shell: it does NOT "
                     "share sethu's allowlist / mode / cwd.")
             if status:
                 print(f"✔ launched {val!r} ({status}) AND added it to the launch list. "

@@ -44,25 +44,34 @@ while IFS= read -r line || [ -n "$line" ]; do     # read ALL of stdin, not line 
     input="$input$line"
 done
 
-case "$input" in
-    *'"prompt"'*)
-        rest=${input#*'"prompt"'}                 # after the key name
-        rest=${rest#"${rest%%[!$ws]*}"}           # strip ws before the colon
-        rest=${rest#:}                            # drop the colon
-        rest=${rest#"${rest%%[!$ws]*}"}           # strip ws after the colon
-        rest=${rest#\"}                           # drop the value's opening quote
-        rest=${rest#"${rest%%[!$ws]*}"}           # strip real leading ws in the value
-        while :; do                               # …and leading JSON ws escapes
-            case "$rest" in
-                '\t'*|'\n'*|'\r'*|'\f'*)
-                    rest=${rest#??}
-                    rest=${rest#"${rest%%[!$ws]*}"} ;;
-                *) break ;;
-            esac
-        done
+work=$input
+while :; do
+    case "$work" in
+        *'"prompt"'*) ;;
+        *) break ;;                               # no (more) "prompt" → nothing to block
+    esac
+    rest=${work#*'"prompt"'}                       # after this "prompt" occurrence
+    work=$rest                                     # advance, in case it's a decoy
+    rest=${rest#"${rest%%[!$ws]*}"}               # strip ws after the key name
+    case "$rest" in
+        :*) ;;                                     # a colon follows → this is the key
+        *) continue ;;                             # not a key (e.g. a value == "prompt") → keep scanning
+    esac
+    rest=${rest#:}                                # drop the colon
+    rest=${rest#"${rest%%[!$ws]*}"}               # strip ws after the colon
+    rest=${rest#\"}                               # drop the value's opening quote
+    rest=${rest#"${rest%%[!$ws]*}"}               # strip real leading ws in the value
+    while :; do                                   # …and leading JSON ws escapes
         case "$rest" in
-            '>'*|sethu*) printf '{"decision":"block","reason":"%s"}\n' "$msg" ;;
+            '\t'*|'\n'*|'\r'*|'\f'*)
+                rest=${rest#??}
+                rest=${rest#"${rest%%[!$ws]*}"} ;;
+            *) break ;;
         esac
-        ;;
-esac
+    done
+    case "$rest" in
+        '>'*|sethu*) printf '{"decision":"block","reason":"%s"}\n' "$msg" ;;
+    esac
+    break                                          # handled the real prompt key
+done
 exit 0
