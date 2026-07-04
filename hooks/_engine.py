@@ -101,9 +101,9 @@ def _c(text, key, on):
 
 def _msg(text, on):
     """A standalone sethu message (refusal, cd, interactive, help, …) prefixed with
-    the branded icon, so every message reads as sethu speaking — like the result
-    header and the `sethu: error:` line do."""
-    return f"{_c(ICON, 'tag', on)} {text}"
+    the branded icon + dim separator, matching the result header (`|^=^| · …`), so
+    every message reads as sethu speaking."""
+    return f"{_c(ICON, 'tag', on)} {_c('·', 'dim', on)} {text}"
 
 
 def _output_path(sid):
