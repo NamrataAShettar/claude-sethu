@@ -366,6 +366,9 @@ INTERACTIVE = {
     "vi", "vim", "nvim", "nano", "emacs", "pico", "less", "more", "most", "man",
     "top", "htop", "btop", "ssh", "telnet", "tmux", "screen", "watch", "fg",
     "psql", "mysql", "sqlite3",
+    # full-screen TUIs a dev is likely to type
+    "claude", "aider", "lazygit", "gitui", "tig", "k9s", "ncdu", "ranger", "nnn",
+    "fzf", "mc", "vifm",
 }
 # NB: interpreter REPLs (python/node/irb/ipython) are handled by _REPL below,
 # which supersedes INTERACTIVE for them — don't re-add them here.
@@ -380,6 +383,15 @@ _REPL = {"python", "python3", "node", "irb", "ipython"}
 # mode; in cwd/stateless each command is a throwaway subprocess, so running one is
 # a silent no-op — better to point the user at shell mode than let it vanish.
 _STATE_BUILTINS = {"export", "source", ".", "alias", "unalias", "unset"}
+
+# A program that switched to the terminal's alternate screen buffer is a
+# full-screen TUI (its captured output is garbled). Catches TUIs not in the
+# INTERACTIVE list, so unknown ones degrade to a helpful hint instead of garbage.
+_ALT_SCREEN = re.compile(r"\x1b\[\?(?:1049|1047|47)h")
+
+
+def _looks_full_screen(out):
+    return bool(out) and _ALT_SCREEN.search(out) is not None
 
 
 def is_interactive(cmd):
@@ -870,6 +882,13 @@ def process(prompt, data):
         )
         return {"context": ctx}
     body = f"{header}\n{shown}"
+    if _looks_full_screen(out):
+        # An unknown full-screen TUI slipped past the INTERACTIVE list; its output
+        # is garbled captured. Say so and point at a real terminal.
+        hint = _c(f"↳ that looks like a full-screen program — captured output "
+                  f"garbles. Run it in a real terminal: sethu --launch \"{cmd}\"",
+                  "warn", on)
+        body = f"{header}\n{hint}\n{shown}"
     if note:
         body += "\n" + _c(note, "dim", on)
     return {"block": body}

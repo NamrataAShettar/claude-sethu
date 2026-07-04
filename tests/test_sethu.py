@@ -37,6 +37,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
   interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
                                          TestRefusalMessages
+  full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
@@ -162,6 +163,8 @@ class TestInteractiveFn(unittest.TestCase):
     def test(self):
         self.assertTrue(_engine.is_interactive("vim file"))
         self.assertTrue(_engine.is_interactive("top"))
+        self.assertTrue(_engine.is_interactive("claude --plugin-dir ~/x"))  # TUI
+        self.assertTrue(_engine.is_interactive("lazygit"))
         self.assertFalse(_engine.is_interactive("ls -la"))
         self.assertFalse(_engine.is_interactive(""))
 
@@ -280,6 +283,25 @@ class TestManagementCLI(Base):
         self.assertIn(_engine.ICON, err)
         self.assertIn("sethu: error:", err)
         self.assertIn("options menu", err)
+
+
+class TestFullScreenTUI(Base):
+    def test_known_tui_refused_as_interactive(self):
+        # claude / lazygit / etc. are in the interactive list -> upfront --launch.
+        self.write(readonly=True, color=False)
+        self.assertIn("interactive", self.proc("> claude --plugin-dir ~/x")["block"])
+
+    def test_unknown_tui_alt_screen_gets_hint(self):
+        # A program that switches to the alt screen at runtime is garbled when
+        # captured; sethu detects the escape and points at --launch.
+        self.write(mode="stateless", trust=True, readonly=False, color=False)
+        b = self.proc(r"> printf '\033[?1049hUI'")["block"]
+        self.assertIn("full-screen program", b)
+        self.assertIn("--launch", b)
+
+    def test_plain_output_gets_no_hint(self):
+        self.write(readonly=True, color=False)
+        self.assertNotIn("full-screen program", self.proc("> ls")["block"])
 
 
 class TestRefusalMessages(Base):
