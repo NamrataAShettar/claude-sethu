@@ -969,7 +969,15 @@ def process(prompt, data):
             f"----- BEGIN COMMAND OUTPUT -----\n{shown}\n"
             f"----- END COMMAND OUTPUT -----{tail}"
         )
-        return {"context": ctx}
+        # `>>` costs tokens (the whole product is about NOT paying them by default),
+        # so surface it locally — otherwise the user sees nothing and the cost is
+        # invisible. Same unified header as `>`, then what was sent + the cost.
+        n = len(shown.splitlines())
+        summary = (f"shared {n} line{'s' if n != 1 else ''} with Claude"
+                   if shown and shown != "(no output)"
+                   else "ran it and shared the (empty) result with Claude")
+        confirm = f"{header}\n{summary} — this used tokens."
+        return {"context": ctx, "note": confirm}
     body = f"{header}\n{shown}"
     if code != 0 and _looks_full_screen(out):
         # A full-screen TUI captured mid-draw emits the alt-screen escape AND fails or

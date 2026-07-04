@@ -586,6 +586,16 @@ class TestRunner(Base):
         self.assertIn("context", r)
         self.assertIn("to-claude", r["context"])
 
+    def test_pipe_gives_local_confirmation(self):
+        # UX2: `>>` costs tokens, so it must show a local confirmation (the unified
+        # header + what was shared + the cost), not just silently send to Claude.
+        self.write(allow=["echo"], color=False)
+        r = self.proc(">> echo hi")
+        self.assertIn("note", r)
+        self.assertIn("$ echo hi", r["note"])         # unified header, echoes cmd
+        self.assertIn("shared 1 line with Claude", r["note"])
+        self.assertIn("used tokens", r["note"])
+
     def test_passthrough(self):
         self.assertEqual(self.proc("just a normal prompt"), {"passthrough": True})
 
@@ -1186,6 +1196,9 @@ class TestHookOutput(Base):
         self.assertEqual(hso["hookEventName"], "UserPromptSubmit")
         self.assertIn("hi", hso["additionalContext"])
         self.assertNotIn("decision", out)   # >> does NOT block
+        # UX2: and a local systemMessage surfaces the token cost to the user.
+        self.assertIn("used tokens", out["systemMessage"])
+        self.assertIn("shared 1 line with Claude", out["systemMessage"])
 
     def test_sethu_management_emits_block(self):
         self.write()
