@@ -1212,14 +1212,33 @@ class TestPython3Shim(unittest.TestCase):
     def test_missing_python3_sethu_prompt_warns(self):
         # No python3 → a SETHU-looking prompt (> … / sethu …) is blocked with the
         # install guidance, so it doesn't silently do nothing (or leak to Claude).
+        # M5: the raw-bytes shim must tolerate the JSON formatting variations the
+        # engine's json.loads()+lstrip() handles — space after the colon, pretty/
+        # multi-line JSON, and leading-whitespace escapes (\t) in the value.
         for prompt in ('{"prompt":"> ls"}', '{"prompt":"  > ls"}',
-                       '{"prompt":"sethu --runner"}'):
+                       '{"prompt":"sethu --runner"}',
+                       '{"prompt": "> ls"}',                 # space after colon
+                       '{"prompt"  :  "> ls"}',              # space around colon
+                       '{\n  "prompt": "> ls"\n}',           # pretty / multi-line
+                       '{"prompt":"\\t> ls"}',               # JSON \t before >
+                       '{"other":"x",\n "prompt":"sethu x"}'):  # key not on line 1
             r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
                           stdin=prompt)
             self.assertEqual(r.returncode, 0, prompt)
             out = json.loads(r.stdout)               # valid JSON
             self.assertEqual(out["decision"], "block", prompt)
             self.assertIn("python3", out["reason"], prompt)
+
+    def test_missing_python3_nonsethu_stays_silent(self):
+        # M5 regression: tolerant parsing must NOT over-block. A normal prompt —
+        # even one whose text merely contains a `>` — passes through silently.
+        for prompt in ('{"prompt":"hello"}', '{"prompt":"is 3 > 2 true?"}',
+                       '{"prompt": "just chatting"}',
+                       '{"prompt":"a \\"prompt\\":\\"> x\\" in text"}'):
+            r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
+                          stdin=prompt)
+            self.assertEqual(r.returncode, 0, prompt)
+            self.assertEqual(r.stdout.strip(), "", prompt)
 
     def test_present_python3_runs_hook(self):
         # With python3, the shim execs it — session_start emits the first-run
