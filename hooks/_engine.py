@@ -77,13 +77,14 @@ def max_lines(cfg):
 # failures, distinguishable from blue. Off via `sethu --color off` or the
 # NO_COLOR env var. Only the header is colored — the command output is untouched.
 _ANSI = {
-    "ok": "38;5;75",       # sky blue   — success (exit 0)
-    "fail": "1;38;5;203",  # bold red   — nonzero exit (errors stand out)
-    "warn": "38;5;214",    # amber      — no exit code (timeout/unknown)
-    "tag": "38;5;37",      # teal       — the [mode] tag
-    "trust": "38;5;208",   # orange     — the ⚠trust warning
-    "cmd": "1",            # bold       — the command that ran
-    "dim": "2",            # dim        — separators ( · $ )
+    "ok": "38;5;75",       # sky blue    — success (exit 0)
+    "fail": "1;38;5;203",  # bold red    — nonzero exit (errors stand out)
+    "warn": "38;5;214",    # amber       — no exit code (timeout/unknown)
+    "icon": "1;38;5;37",   # bold teal   — the |^=^| brand mark (pops vs the tag)
+    "tag": "38;5;37",      # teal        — the [mode] tag
+    "trust": "38;5;208",   # orange      — the ⚠trust warning
+    "cmd": "1",            # bold        — the command that ran
+    "dim": "2",            # dim         — separators ( · $ )
 }
 
 
@@ -97,6 +98,32 @@ def _color_on(cfg):
 
 def _c(text, key, on):
     return f"\033[{_ANSI[key]}m{text}\033[0m" if on else text
+
+
+def _msg(text, on):
+    """A standalone sethu message with no command context (bare `>` help), prefixed
+    with the branded icon + dim separator."""
+    return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
+
+
+def _header(mode, trust_on, mark_status, cmd, on):
+    """The unified header:  |^=^| · [mode] [⚠trust] · [status ·] $ cmd
+    Every part is dim-`·`-separated. `mark_status` is the coloured `✓ exit 0`-style
+    string for a RUN, or None for a message that never ran (refusal/cd/interactive):
+    then the status slot is omitted, so a non-run is never given a fake exit status."""
+    segs = [_c(ICON, "icon", on), _c(f"[{mode}]", "tag", on)]
+    if trust_on:
+        segs.append(_c("⚠trust", "trust", on))
+    if mark_status is not None:
+        segs.append(mark_status)
+    segs.append(f"{_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}")
+    return f" {_c('·', 'dim', on)} ".join(segs)
+
+
+def _reply(mode, trust_on, cmd, body, on):
+    """A non-run response: the unified header (no status) + `body` on the next line.
+    The command lives in the header, so `body` shouldn't re-echo it."""
+    return _header(mode, trust_on, None, cmd, on) + "\n" + body
 
 
 def _output_path(sid):
@@ -118,7 +145,12 @@ def _sweep_temp(now, force=False):
     `now` is passed in (time.time()) so it's testable. Throttled to ~once an hour
     via a sentinel file, since scanning the temp dir on every command is wasteful
     for a 7-day GC (cost scales with temp-dir size, not sethu's file count).
-    Sockets are left alone — the daemon manages their lifecycle."""
+    A live daemon manages its own socket, but a SIGKILL'd one leaves the socket
+    file behind; anything 7+ days old is dead in practice (the daemon idles out
+    after 30 min, so nothing lives that long — the sole exception, a session used
+    continuously for 7+ days, just loses shell state and respawns on the next
+    command), so it's swept too. Per-session cwd files are swept on the same age
+    rule (a session idle for 7 days is long gone)."""
     tmp = tempfile.gettempdir()
     sentinel = os.path.join(tmp, "sethu-swept")
     if not force:
@@ -142,7 +174,9 @@ def _sweep_temp(now, force=False):
     for e in entries:
         n = e.name
         if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
-                (n.startswith("sethu-launch-") and n.endswith(".command"))):
+                (n.startswith("sethu-launch-") and n.endswith(".command")) or
+                (n.startswith("sethu-") and n.endswith(".sock")) or
+                n.startswith("sethu-cwd-")):
             continue
         try:
             if now - e.stat().st_mtime > _TEMP_MAX_AGE:
@@ -216,24 +250,52 @@ def first_run_hint():
         os.makedirs(os.path.dirname(marker), exist_ok=True)
         open(marker, "w").close()
     except Exception:
-        pass
+        # Can't record that we showed it → skip, so a read-only config dir doesn't
+        # get the "once per machine" hint on every single session.
+        return None
     return {"systemMessage": FIRST_RUN_HINT}
+
+
+def _type_ok(default, v):
+    """True if a user-config value `v` is compatible with its DEFAULTS type, so a
+    hand-edited config (e.g. `"allow": "ls"`) can't crash callers that index or
+    append. bool is checked before int (bool is a subclass of int)."""
+    if isinstance(default, bool):
+        return isinstance(v, bool)
+    if isinstance(default, list):
+        return isinstance(v, list)
+    if isinstance(default, int):
+        return isinstance(v, int) and not isinstance(v, bool)
+    if isinstance(default, str):
+        return isinstance(v, str)
+    return True
 
 
 def load_config():
     """Return the effective config: DEFAULTS overlaid with any keys present in
     the user's config file. Every DEFAULTS key is guaranteed present (so callers
-    can index directly). A missing or malformed file falls back to DEFAULTS."""
+    can index directly). A missing or malformed file, or a wrongly-typed value,
+    falls back to the DEFAULTS entry for that key."""
     cfg = {k: (list(v) if isinstance(v, list) else v) for k, v in DEFAULTS.items()}
     try:
         with open(config_path()) as f:
             user = json.load(f)
         if isinstance(user, dict):
-            for k in DEFAULTS:
-                if k in user:
+            for k, default in DEFAULTS.items():
+                if k in user and _type_ok(default, user[k]):
                     cfg[k] = user[k]
     except Exception:
         pass
+    # Value-level normalization (beyond type), so a hand-edited config can't crash
+    # or misbehave: list entries must be strings (else `_matches` does str+int),
+    # mode must be a real mode, and the prefix can't be empty (which would match
+    # every prompt).
+    cfg["allow"] = [str(x) for x in cfg["allow"]]
+    cfg["launch"] = [str(x) for x in cfg["launch"]]
+    if cfg["mode"] not in MODES:
+        cfg["mode"] = DEFAULTS["mode"]
+    if not cfg["prefix"]:
+        cfg["prefix"] = DEFAULTS["prefix"]
     return cfg
 
 
@@ -333,6 +395,9 @@ INTERACTIVE = {
     "vi", "vim", "nvim", "nano", "emacs", "pico", "less", "more", "most", "man",
     "top", "htop", "btop", "ssh", "telnet", "tmux", "screen", "watch", "fg",
     "psql", "mysql", "sqlite3",
+    # full-screen TUIs a dev is likely to type
+    "claude", "aider", "lazygit", "gitui", "tig", "k9s", "ncdu", "ranger", "nnn",
+    "fzf", "mc", "vifm",
 }
 # NB: interpreter REPLs (python/node/irb/ipython) are handled by _REPL below,
 # which supersedes INTERACTIVE for them — don't re-add them here.
@@ -347,6 +412,15 @@ _REPL = {"python", "python3", "node", "irb", "ipython"}
 # mode; in cwd/stateless each command is a throwaway subprocess, so running one is
 # a silent no-op — better to point the user at shell mode than let it vanish.
 _STATE_BUILTINS = {"export", "source", ".", "alias", "unalias", "unset"}
+
+# A program that switched to the terminal's alternate screen buffer is a
+# full-screen TUI (its captured output is garbled). Catches TUIs not in the
+# INTERACTIVE list, so unknown ones degrade to a helpful hint instead of garbage.
+_ALT_SCREEN = re.compile(r"\x1b\[\?(?:1049|1047|47)h")
+
+
+def _looks_full_screen(out):
+    return bool(out) and _ALT_SCREEN.search(out) is not None
 
 
 def is_interactive(cmd):
@@ -724,6 +798,7 @@ def process(prompt, data):
     stripped = prompt.lstrip()
     if not prefix or not stripped.startswith(prefix):
         return {"passthrough": True}
+    on = _color_on(cfg)  # every sethu message below carries the branded icon
 
     # Opportunistically clear sethu's own stale temp files (saved output, launch
     # scripts) so storage doesn't bloat. Cheap, best-effort, only on our prompts.
@@ -735,15 +810,18 @@ def process(prompt, data):
     pipe = stripped.startswith(prefix * 2)
     cmd = stripped[len(prefix) * (2 if pipe else 1):].strip()
     if not cmd:
-        return {"block": HELP}
+        return {"block": _msg(HELP, on)}
+
+    mode = cfg.get("mode", "cwd")
+    # readonly wins if a legacy config somehow has both on (safe default).
+    trust_on = cfg.get("trust") and not cfg.get("readonly")
+    sid = data.get("session_id")
+    base = get_cwd(sid, data.get("cwd"))
 
     if _matches(cmd, cfg["launch"]):
         status = launch_in_terminal(cmd)
-        return {"block": status or f"Couldn't open a terminal — run `{cmd}` yourself."}
-
-    mode = cfg.get("mode", "cwd")
-    sid = data.get("session_id")
-    base = get_cwd(sid, data.get("cwd"))
+        return {"block": _reply(mode, trust_on, cmd,
+                status or "couldn't open a terminal, run it in your own terminal.", on)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
     if is_cd(cmd) and mode != "shell":
@@ -751,34 +829,32 @@ def process(prompt, data):
             target = resolve_cd(cmd[2:], base)
             if os.path.isdir(target):
                 set_cwd(sid, target)
-                return {"block": f"→ {target}"}
-            return {"block": f"cd: not a directory: {target}"}
-        return {"block": "stateless mode — cd doesn't persist. Use an inline path "
-                         "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`)."}
+                return {"block": _reply(mode, trust_on, cmd, f"→ {target}", on)}
+            return {"block": _reply(mode, trust_on, cmd,
+                    f"cd: not a directory: {target}", on)}
+        return {"block": _reply(mode, trust_on, cmd,
+                "stateless mode: cd doesn't persist. Use an inline path "
+                "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`).", on)}
 
     # Interactive programs would hang the captured runner (no terminal), and
     # --allow can't change that. Checked BEFORE the allow gate so an interactive
     # command always gets the --launch guidance, never a misleading "allow it".
     if not is_cd(cmd) and is_interactive(cmd):
-        first = os.path.basename(cmd.split()[0])
-        return {"block":
-                f"`{first}` is interactive and needs a real terminal, so the runner "
-                f"can't capture it (it would hang). Allowlisting won't help. Open it "
-                f"in a terminal instead:\n  sethu --launch \"{cmd}\""}
+        return {"block": _reply(mode, trust_on, cmd,
+                "this is interactive and needs a real terminal, so the runner can't "
+                "capture it (it would hang). Allowlisting won't help. Open it in a "
+                f"terminal instead:\n  sethu --launch \"{cmd}\"", on)}
 
     # State-setting builtins only stick in shell mode; in cwd/stateless they run in
     # a throwaway subprocess and vanish. Point the user at shell mode up front
     # instead of silently no-op'ing (or refusing with an unrelated reason).
     if mode != "shell" and cmd.split() and cmd.split()[0] in _STATE_BUILTINS:
-        first = cmd.split()[0]
-        return {"block":
-                f"`{first}` only persists in shell mode. In `{mode}` mode each command "
-                f"runs in a fresh subprocess, so this wouldn't carry to the next one. "
-                f"Switch with `sethu --mode shell` (add `sethu --rc on` to load your "
-                f"aliases and functions)."}
+        return {"block": _reply(mode, trust_on, cmd,
+                f"only persists in shell mode. In `{mode}` mode each command runs in a "
+                f"fresh subprocess, so this wouldn't carry to the next one. Switch with "
+                f"`sethu --mode shell` (add `sethu --rc on` to load your aliases and "
+                f"functions).", on)}
 
-    # readonly wins if a legacy config somehow has both on (safe default).
-    trust_on = cfg.get("trust") and not cfg.get("readonly")
     allowed = trust_on or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
@@ -787,13 +863,13 @@ def process(prompt, data):
         why_line = (why + "\n") if why else ""
         ro = "" if cfg.get("readonly") else \
             "  • Auto-allow read-only cmds: sethu --readonly on\n"
-        return {"block":
-                f"`{cmd}` isn't allowed to run.\n"
+        return {"block": _reply(mode, trust_on, cmd,
+                f"isn't allowed to run.\n"
                 f"{why_line}"
                 f"  • Allow it (your call):  sethu --allow \"{cmd}\"\n"
                 f"{ro}"
                 f"  • Open in a terminal:    sethu --launch \"{cmd}\"\n"
-                f"  • See config:            sethu --runner"}
+                f"  • See config:            sethu --runner", on)}
 
     t = cmd_timeout(cfg)
     if mode == "shell":
@@ -806,17 +882,12 @@ def process(prompt, data):
 
     # Completion header: which mode (+ trust warning) + done/failed + exit code.
     # Each part is colored distinctly (colorblind-safe) so the status, command,
-    # and output read apart at a glance.
-    on = _color_on(cfg)
+    # and output read apart at a glance. (`on` was computed near the top.)
     state = "ok" if code == 0 else ("fail" if code is not None else "warn")
     mark = {"ok": "✓", "fail": "✗", "warn": "⚠"}[state]
     status = f"exit {code}" if code is not None else "no exit code"
-    tag = _c(f"[{mode}]", "tag", on)
-    if trust_on:
-        tag += " " + _c("⚠trust", "trust", on)
     mark_status = _c(f"{mark} {status}", state, on)
-    icon = _c(ICON, "tag", on)
-    header = f"{icon} {tag} {mark_status} {_c('·', 'dim', on)} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
+    header = _header(mode, trust_on, mark_status, cmd, on)
 
     # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
     # The full text is written to a per-session file; the note points at it.
@@ -836,8 +907,22 @@ def process(prompt, data):
         )
         return {"context": ctx}
     body = f"{header}\n{shown}"
+    if code != 0 and _looks_full_screen(out):
+        # A full-screen TUI captured mid-draw emits the alt-screen escape AND fails or
+        # times out (never a clean exit 0) — so gate on that to avoid a false positive
+        # when a command legitimately prints those bytes and succeeds. Point at a real
+        # terminal.
+        hint = _c(f"⚠ that looks like a full-screen program, captured output "
+                  f"garbles. Run it in a real terminal: sethu --launch \"{cmd}\"",
+                  "warn", on)
+        body = f"{header}\n{hint}\n{shown}"
     if note:
         body += "\n" + _c(note, "dim", on)
+    if "\x1b" in shown:
+        # The command's own output may leave a color/attribute open (common when a
+        # TUI is captured mid-draw); close it so it doesn't bleed into the rest of
+        # the transcript. This resets state, it doesn't recolor the output.
+        body += "\033[0m"
     return {"block": body}
 
 
@@ -889,13 +974,26 @@ def normalize_argv(argv):
     return argv
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse, but errors are branded and colored so they stand out (argparse's
+    default dumps a plain, monochrome usage wall that's hard to spot the error in).
+    Points at the menu instead of re-printing every flag."""
+    def error(self, message):
+        on = _color_on(load_config())
+        sys.stderr.write(
+            _c(ICON, "icon", on) + " "
+            + _c(f"sethu: error: {message}", "fail", on) + "\n"
+            + _c("Run `sethu` for the options menu.", "dim", on) + "\n")
+        sys.exit(2)
+
+
 def main(argv=None):
     args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
     if not args_list:
         print(help_text())
         return
 
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="sethu", description="sethu: run terminal commands from Claude's prompt box",
         epilog=help_text(), formatter_class=argparse.RawDescriptionHelpFormatter,
     )

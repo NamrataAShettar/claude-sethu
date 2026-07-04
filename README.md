@@ -268,6 +268,11 @@ pipe, and config round-trips. Every feature and CLI argument maps to a test (a
 coverage table at the top of `tests/test_sethu.py`, guarded by a meta-test that
 fails if any argument is untested). CI runs them on every push and PR.
 
+See **[docs/testing.md](docs/testing.md)** for how to exercise a behavior directly
+and how to test a feature branch live in Claude Code before merging, and
+**[docs/design-guidelines.md](docs/design-guidelines.md)** for the UX / correctness
+/ security / performance / storage principles every change is checked against.
+
 ## ℹ️ About Claude Code
 
 sethu is a plugin for **[Claude Code](https://claude.com/claude-code)**,

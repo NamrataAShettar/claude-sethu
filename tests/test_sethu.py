@@ -33,9 +33,11 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --restart                              TestManagementCLI, TestKillDaemons     [x]
   --runner / --show (config)             TestManagementCLI, TestHookOutput      [x]
   bare `sethu` (help menu)               TestManagementCLI                      [x]
+  branded/colored CLI errors             TestManagementCLI                      [x]
   subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
   interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
                                          TestRefusalMessages
+  full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
@@ -47,8 +49,13 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
   python3-missing shim (run.sh)          TestPython3Shim                        [x]
-  icon constant                          TestIcon                               [x]
+  icon constant + header separator       TestIcon                               [x]
+  header format (dot-sep, status/runs)   TestHeaderFormat                       [x]
   every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
+  malformed config: type + value guard   TestConfig                             [x]
+  unterminated-quote command refused     TestHookOutput                         [x]
+  first-run hint skips if unwritable     TestFirstRunHint                       [x]
+  orphaned socket + cwd file swept       TestSweep                              [x]
 """
 import json
 import os
@@ -152,11 +159,29 @@ class TestHookGate(Base):
         self.assertTrue(sethu_hook._maybe_sethu("!! ls"))
         self.assertFalse(sethu_hook._maybe_sethu("regular text"))
 
+    def test_fast_path_skips_engine_import(self):
+        # Every-prompt perf guard: a NON-sethu prompt must NOT import _engine (the
+        # heavy module). Deterministic stand-in for "sethu's overhead is sub-ms" —
+        # wall-clock isn't CI-stable, this is.
+        self.write()
+        hook = os.path.join(HOOKS, "sethu_hook.py")
+
+        def imports_engine(prompt):
+            r = subprocess.run([sys.executable, "-X", "importtime", hook],
+                               input=prompt, capture_output=True, text=True,
+                               env=dict(os.environ, SETHU_CONFIG=self.cfg))
+            return "_engine" in r.stderr   # -X importtime writes to stderr
+
+        self.assertFalse(imports_engine('{"prompt":"just a normal message"}'))
+        self.assertTrue(imports_engine('{"prompt":"> ls"}'))  # loaded only on demand
+
 
 class TestInteractiveFn(unittest.TestCase):
     def test(self):
         self.assertTrue(_engine.is_interactive("vim file"))
         self.assertTrue(_engine.is_interactive("top"))
+        self.assertTrue(_engine.is_interactive("claude --plugin-dir ~/x"))  # TUI
+        self.assertTrue(_engine.is_interactive("lazygit"))
         self.assertFalse(_engine.is_interactive("ls -la"))
         self.assertFalse(_engine.is_interactive(""))
 
@@ -263,6 +288,73 @@ class TestManagementCLI(Base):
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))
 
+    def test_bad_arg_error_is_branded(self):
+        # A bad flag gives a branded, concise error (icon + 'error:' + menu
+        # pointer), not argparse's plain usage wall.
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit):
+            _engine.main(["--mode", "nope"])
+        err = buf.getvalue()
+        self.assertIn(_engine.ICON, err)
+        self.assertIn("sethu: error:", err)
+        self.assertIn("options menu", err)
+
+
+class TestHeaderFormat(Base):
+    """Pins the exact header across permutations (color off), so a spacing or
+    separator regression fails here instead of by eye. Catches the class of bug
+    where a part (e.g. ⚠trust) wasn't `·`-separated."""
+    def test_run_header(self):
+        self.write(readonly=True, color=False)
+        h = self.proc("> ls")["block"].split("\n")[0]
+        self.assertEqual(h, "|^=^| · [cwd] · ✓ exit 0 · $ ls")
+
+    def test_refusal_header_omits_status(self):
+        self.write(readonly=True, color=False)
+        h = self.proc("> git branch")["block"].split("\n")[0]
+        self.assertEqual(h, "|^=^| · [cwd] · $ git branch")
+
+    def test_trust_segment_is_dot_separated(self):
+        # regression: ⚠trust used to be space-glued to the [mode] tag.
+        self.write(mode="shell", trust=True, readonly=False, color=False)
+        h = self.proc("> claude")["block"].split("\n")[0]  # interactive refusal
+        self.assertEqual(h, "|^=^| · [shell] · ⚠trust · $ claude")
+
+
+class TestFullScreenTUI(Base):
+    def test_known_tui_refused_as_interactive(self):
+        # claude / lazygit / etc. are in the interactive list -> upfront --launch.
+        self.write(readonly=True, color=False)
+        self.assertIn("interactive", self.proc("> claude --plugin-dir ~/x")["block"])
+
+    def test_unknown_tui_alt_screen_gets_hint(self):
+        # A TUI captured mid-draw emits the alt-screen escape AND fails/times out;
+        # sethu detects the escape (on a non-clean exit) and points at --launch.
+        self.write(mode="stateless", trust=True, readonly=False, color=False)
+        b = self.proc(r"> printf '\033[?1049hUI'; false")["block"]  # escape, exit 1
+        self.assertIn("full-screen program", b)
+        self.assertIn("--launch", b)
+
+    def test_alt_screen_on_clean_exit_no_hint(self):
+        # A command that legitimately prints those bytes and exits 0 must NOT trip
+        # the hint (false-positive guard).
+        self.write(mode="stateless", trust=True, readonly=False, color=False)
+        self.assertNotIn("full-screen program",
+                         self.proc(r"> printf '\033[?1049hUI'")["block"])
+
+    def test_plain_output_gets_no_hint(self):
+        self.write(readonly=True, color=False)
+        self.assertNotIn("full-screen program", self.proc("> ls")["block"])
+
+    def test_command_ansi_is_reset_to_prevent_bleed(self):
+        # A command that leaves a colour/attribute open gets a trailing reset so it
+        # doesn't bleed into the rest of the transcript. Plain output doesn't.
+        self.write(trust=True, readonly=False, color=False)
+        self.assertTrue(self.proc(r"> printf '\033[33mopen'")["block"].endswith("\x1b[0m"))
+        self.assertFalse(self.proc("> printf plain")["block"].endswith("\x1b[0m"))
+
 
 class TestRefusalMessages(Base):
     def test_interactive_leads_with_launch_not_allow(self):
@@ -289,6 +381,17 @@ class TestRefusalMessages(Base):
 
     def test_timeout_message_mentions_hook_budget(self):
         self.assertIn("hook budget", _engine._timeout_msg(20, "sleep 99"))
+
+    def test_refusal_has_unified_header_without_status(self):
+        # Every response shares the header format; a refusal echoes the command but
+        # omits the exit-status slot (it never ran), so it can't be mislabelled.
+        self.write(readonly=True, color=False)
+        first = self.proc("> git branch")["block"].split("\n")[0]
+        self.assertIn("[cwd]", first)          # mode tag
+        self.assertIn("$ git branch", first)   # command echoed in the header
+        self.assertNotIn("exit", first)        # but NO exit status
+        # a real run DOES show a status
+        self.assertIn("exit 0", self.proc("> ls")["block"].split("\n")[0])
 
     def test_refusal_offers_safer_path_when_one_exists(self):
         # Where a read-only way exists, the message points to it (not only --allow).
@@ -409,6 +512,11 @@ class TestIcon(Base):
         # The pipe-to-Claude context stays clean (icon is for your eyes only).
         self.assertNotIn(_engine.ICON, self.proc(">> echo hi")["context"])
 
+    def test_separator_between_icon_and_tag(self):
+        # A dim `·` splits the icon from the [mode] tag so they don't blend (UX7).
+        self.write(readonly=True, color=False)
+        self.assertIn(_engine.ICON + " · [cwd]", self.proc("> ls")["block"])
+
 
 class TestColor(Base):
     def test_header_colored_by_default(self):
@@ -485,19 +593,23 @@ class TestSweep(unittest.TestCase):
         tmp = _tf.gettempdir()
         old = os.path.join(tmp, "sethu-out-deadbeef0001.log")
         cmd = os.path.join(tmp, "sethu-launch-deadbeef0002.command")
+        sock = os.path.join(tmp, "sethu-deadbeef0004-p0.sock")   # orphaned socket
+        cwd = os.path.join(tmp, "sethu-cwd-deadbeef0005")        # dead-session cwd
         fresh = os.path.join(tmp, "sethu-out-deadbeef0003.log")
-        for p in (old, cmd, fresh):
+        for p in (old, cmd, sock, cwd, fresh):
             open(p, "w").close()
         self.addCleanup(lambda: [os.path.exists(p) and os.unlink(p)
-                                 for p in (old, cmd, fresh)])
+                                 for p in (old, cmd, sock, cwd, fresh)])
         now = os.path.getmtime(fresh) + 100
-        # Backdate two files well past the max age.
+        # Backdate the stale files well past the max age.
         stale = now - _engine._TEMP_MAX_AGE - 1000
-        os.utime(old, (stale, stale))
-        os.utime(cmd, (stale, stale))
+        for p in (old, cmd, sock, cwd):
+            os.utime(p, (stale, stale))
         _engine._sweep_temp(now, force=True)   # bypass the once-an-hour throttle
         self.assertFalse(os.path.exists(old), "stale .log should be swept")
         self.assertFalse(os.path.exists(cmd), "stale .command should be swept")
+        self.assertFalse(os.path.exists(sock), "stale orphaned .sock should be swept")
+        self.assertFalse(os.path.exists(cwd), "stale cwd file should be swept")
         self.assertTrue(os.path.exists(fresh), "fresh file must be kept")
 
     def test_sweep_throttled(self):
@@ -784,6 +896,19 @@ class TestFirstRunHint(Base):
         self.assertEqual(os.path.dirname(_engine._welcome_marker()),
                          os.path.dirname(_engine.config_path()))
 
+    def test_skips_hint_when_marker_unwritable(self):
+        # If the marker can't be persisted, don't nudge (else it repeats every
+        # session on a read-only config dir).
+        f = tempfile.NamedTemporaryFile(delete=False)
+        f.close()
+        os.environ["SETHU_CONFIG"] = os.path.join(f.name, "sub", "sethu.json")
+        try:
+            self.assertIsNone(_engine.first_run_hint())
+            self.assertIsNone(_engine.first_run_hint())   # still silent, not spam
+        finally:
+            os.environ["SETHU_CONFIG"] = self.cfg
+            os.unlink(f.name)
+
 
 class TestConfig(Base):
     def test_defaults_when_missing(self):
@@ -821,6 +946,41 @@ class TestConfig(Base):
         self.assertEqual(_engine.max_lines({}), 40)
         self.assertEqual(_engine.max_lines({"maxLines": 0}), 0)      # unlimited
         self.assertEqual(_engine.max_lines({"maxLines": 100}), 100)
+
+    def test_malformed_config_types_fall_back(self):
+        # A hand-edited config with wrongly-typed values falls back per key
+        # instead of crashing callers that index/append.
+        with open(self.cfg, "w") as f:
+            json.dump({"allow": "ls", "launch": 5, "readonly": "off",
+                       "prefix": 9, "mode": ["x"]}, f)
+        c = _engine.load_config()
+        self.assertEqual(c["allow"], [])       # non-list -> default []
+        self.assertEqual(c["launch"], [])
+        self.assertIs(c["readonly"], True)     # "off" (str) isn't a bool -> default
+        self.assertEqual(c["prefix"], ">")     # non-str -> default
+        self.assertEqual(c["mode"], "cwd")     # non-str -> default
+
+    def test_allow_survives_malformed_config(self):
+        # The CLI mutation path must not crash when the on-disk list is malformed.
+        import io
+        import contextlib
+        with open(self.cfg, "w") as f:
+            json.dump({"allow": "ls"}, f)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _engine.main(["--allow", "foo"])   # previously AttributeError
+        self.assertIn("foo", _engine.load_config()["allow"])
+
+    def test_malformed_config_values_normalized(self):
+        # Beyond type: non-string list entries are coerced (else `_matches` does
+        # str + int → TypeError), a bad mode falls back, and an empty prefix falls
+        # back (an empty prefix would match every prompt).
+        with open(self.cfg, "w") as f:
+            json.dump({"allow": [1, 2], "mode": "banana", "prefix": ""}, f)
+        c = _engine.load_config()
+        self.assertEqual(c["allow"], ["1", "2"])
+        self.assertEqual(c["mode"], "cwd")
+        self.assertEqual(c["prefix"], ">")
+        self.proc("> ls")   # non-string allowlist previously crashed process()
 
     def test_setter_flags_roundtrip(self):
         # The management CLI persists each config-setter flag.
@@ -884,6 +1044,16 @@ class TestHookOutput(Base):
         r = self._run("just a normal message to claude")
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
+
+    def test_unterminated_quote_is_refused(self):
+        # `sethu allow "oops` (unbalanced quote) must refuse, not persist garbage.
+        self.write()
+        out = json.loads(self._run('sethu allow "oops').stdout)
+        self.assertEqual(out["decision"], "block")
+        self.assertIn("quotes", out["reason"])
+        self.assertIn(_engine.ICON, out["reason"])         # branded like other messages
+        self.assertIn("sethu: error:", out["reason"])      # matches the CLI error format
+        self.assertNotIn('"oops', _engine.load_config()["allow"])
 
     def test_run_command_emits_block(self):
         self.write(readonly=True)
