@@ -111,6 +111,21 @@ Use the full git URL with `#<branch>` (the `owner/repo#branch` shorthand isn't
 reliable yet). Pull newer pushes with `/plugin marketplace update sethu`. When
 done, **restore the released plugin** (below).
 
+### Refreshing after new commits
+
+Nothing updates automatically — a push to the remote does not reach a running
+session on its own. To pick up new changes:
+
+- **A / B (live local files):** they reflect your local checkout, not the remote.
+  If the change is already in your working tree (you made it, or it's on the branch
+  you're on), just `/reload-plugins`. If it was pushed from elsewhere, `git pull`
+  (or `git checkout <branch> && git pull`) first, then `/reload-plugins`.
+- **C (pushed branch):** `/plugin marketplace update sethu`, then `/reload-plugins`.
+
+(Python code edits are re-read fresh on the next `>` command, but run
+`/reload-plugins` after any change to be sure — and always after a `hooks.json`,
+plugin.json, or marketplace change.)
+
 ### Restore the released plugin (after Option A or C)
 
 ```
