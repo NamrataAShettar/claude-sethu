@@ -8,9 +8,13 @@ with one, either don't make it or update this doc deliberately.
 
 ## UX
 
-- **Brand every message.** Every sethu message (result header, refusal, cd,
-  interactive, error, menu, first-run) starts with the `|^=^|` icon, so it reads as
-  sethu speaking. Helper: `_msg(text, on)`.
+- **One unified header for every response.** Result *and* message share
+  `|^=^| · [mode] [⚠trust] · [status ·] $ cmd` (helper `_header`), every part dim-`·`
+  -separated. A real run fills the status slot (`✓/✗/⚠` from the exit code); a
+  message that never ran (refusal/cd/interactive) **omits** it — never a fake
+  status. The command lives in the header, so the body (line 2+) doesn't re-echo it
+  and reads as a continuation ("`$ git branch`" → "isn't allowed to run"). Bare `>`
+  (no command) is the one exception (`_msg`).
 - **Colorblind-safe palette (Okabe-Ito), and keep it lean.** blue = success,
   red/vermillion = failure, amber = warning, teal = brand/`[mode]` tag, orange =
   `⚠trust`. No green/red pairing. Differentiate with **weight or separators, not

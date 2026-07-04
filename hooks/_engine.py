@@ -100,10 +100,30 @@ def _c(text, key, on):
 
 
 def _msg(text, on):
-    """A standalone sethu message (refusal, cd, interactive, help, …) prefixed with
-    the branded icon + dim separator, matching the result header (`|^=^| · …`), so
-    every message reads as sethu speaking."""
+    """A standalone sethu message with no command context (bare `>` help), prefixed
+    with the branded icon + dim separator."""
     return f"{_c(ICON, 'tag', on)} {_c('·', 'dim', on)} {text}"
+
+
+def _header(mode, trust_on, mark_status, cmd, on):
+    """The unified header:  |^=^| · [mode] [⚠trust] · [status ·] $ cmd
+    Every part is dim-`·`-separated. `mark_status` is the coloured `✓ exit 0`-style
+    string for a RUN, or None for a message that never ran (refusal/cd/interactive):
+    then the status slot is omitted, so a non-run is never given a fake exit status."""
+    tag = _c(f"[{mode}]", "tag", on)
+    if trust_on:
+        tag += " " + _c("⚠trust", "trust", on)
+    segs = [_c(ICON, "tag", on), tag]
+    if mark_status is not None:
+        segs.append(mark_status)
+    segs.append(f"{_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}")
+    return f" {_c('·', 'dim', on)} ".join(segs)
+
+
+def _reply(mode, trust_on, cmd, body, on):
+    """A non-run response: the unified header (no status) + `body` on the next line.
+    The command lives in the header, so `body` shouldn't re-echo it."""
+    return _header(mode, trust_on, None, cmd, on) + "\n" + body
 
 
 def _output_path(sid):
@@ -790,13 +810,16 @@ def process(prompt, data):
     if not cmd:
         return {"block": _msg(HELP, on)}
 
-    if _matches(cmd, cfg["launch"]):
-        status = launch_in_terminal(cmd)
-        return {"block": _msg(status or f"Couldn't open a terminal, run `{cmd}` yourself.", on)}
-
     mode = cfg.get("mode", "cwd")
+    # readonly wins if a legacy config somehow has both on (safe default).
+    trust_on = cfg.get("trust") and not cfg.get("readonly")
     sid = data.get("session_id")
     base = get_cwd(sid, data.get("cwd"))
+
+    if _matches(cmd, cfg["launch"]):
+        status = launch_in_terminal(cmd)
+        return {"block": _reply(mode, trust_on, cmd,
+                status or "couldn't open a terminal, run it in your own terminal.", on)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
     if is_cd(cmd) and mode != "shell":
@@ -804,35 +827,32 @@ def process(prompt, data):
             target = resolve_cd(cmd[2:], base)
             if os.path.isdir(target):
                 set_cwd(sid, target)
-                return {"block": _msg(f"→ {target}", on)}
-            return {"block": _msg(f"cd: not a directory: {target}", on)}
-        return {"block": _msg("stateless mode: cd doesn't persist. Use an inline "
-                              "path (`> ls ..`), or switch: `sethu --mode cwd` "
-                              "(or `shell`).", on)}
+                return {"block": _reply(mode, trust_on, cmd, f"→ {target}", on)}
+            return {"block": _reply(mode, trust_on, cmd,
+                    f"cd: not a directory: {target}", on)}
+        return {"block": _reply(mode, trust_on, cmd,
+                "stateless mode: cd doesn't persist. Use an inline path "
+                "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`).", on)}
 
     # Interactive programs would hang the captured runner (no terminal), and
     # --allow can't change that. Checked BEFORE the allow gate so an interactive
     # command always gets the --launch guidance, never a misleading "allow it".
     if not is_cd(cmd) and is_interactive(cmd):
-        first = os.path.basename(cmd.split()[0])
-        return {"block": _msg(
-                f"`{first}` is interactive and needs a real terminal, so the runner "
-                f"can't capture it (it would hang). Allowlisting won't help. Open it "
-                f"in a terminal instead:\n  sethu --launch \"{cmd}\"", on)}
+        return {"block": _reply(mode, trust_on, cmd,
+                "this is interactive and needs a real terminal, so the runner can't "
+                "capture it (it would hang). Allowlisting won't help. Open it in a "
+                f"terminal instead:\n  sethu --launch \"{cmd}\"", on)}
 
     # State-setting builtins only stick in shell mode; in cwd/stateless they run in
     # a throwaway subprocess and vanish. Point the user at shell mode up front
     # instead of silently no-op'ing (or refusing with an unrelated reason).
     if mode != "shell" and cmd.split() and cmd.split()[0] in _STATE_BUILTINS:
-        first = cmd.split()[0]
-        return {"block": _msg(
-                f"`{first}` only persists in shell mode. In `{mode}` mode each command "
-                f"runs in a fresh subprocess, so this wouldn't carry to the next one. "
-                f"Switch with `sethu --mode shell` (add `sethu --rc on` to load your "
-                f"aliases and functions).", on)}
+        return {"block": _reply(mode, trust_on, cmd,
+                f"only persists in shell mode. In `{mode}` mode each command runs in a "
+                f"fresh subprocess, so this wouldn't carry to the next one. Switch with "
+                f"`sethu --mode shell` (add `sethu --rc on` to load your aliases and "
+                f"functions).", on)}
 
-    # readonly wins if a legacy config somehow has both on (safe default).
-    trust_on = cfg.get("trust") and not cfg.get("readonly")
     allowed = trust_on or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
@@ -841,8 +861,8 @@ def process(prompt, data):
         why_line = (why + "\n") if why else ""
         ro = "" if cfg.get("readonly") else \
             "  • Auto-allow read-only cmds: sethu --readonly on\n"
-        return {"block": _msg(
-                f"`{cmd}` isn't allowed to run.\n"
+        return {"block": _reply(mode, trust_on, cmd,
+                f"isn't allowed to run.\n"
                 f"{why_line}"
                 f"  • Allow it (your call):  sethu --allow \"{cmd}\"\n"
                 f"{ro}"
@@ -864,13 +884,8 @@ def process(prompt, data):
     state = "ok" if code == 0 else ("fail" if code is not None else "warn")
     mark = {"ok": "✓", "fail": "✗", "warn": "⚠"}[state]
     status = f"exit {code}" if code is not None else "no exit code"
-    tag = _c(f"[{mode}]", "tag", on)
-    if trust_on:
-        tag += " " + _c("⚠trust", "trust", on)
     mark_status = _c(f"{mark} {status}", state, on)
-    icon = _c(ICON, "tag", on)
-    dot = _c("·", "dim", on)  # dim separator so the teal icon and [mode] tag don't blend
-    header = f"{icon} {dot} {tag} {mark_status} {dot} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
+    header = _header(mode, trust_on, mark_status, cmd, on)
 
     # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
     # The full text is written to a per-session file; the note points at it.

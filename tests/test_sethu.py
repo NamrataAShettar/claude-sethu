@@ -337,6 +337,17 @@ class TestRefusalMessages(Base):
     def test_timeout_message_mentions_hook_budget(self):
         self.assertIn("hook budget", _engine._timeout_msg(20, "sleep 99"))
 
+    def test_refusal_has_unified_header_without_status(self):
+        # Every response shares the header format; a refusal echoes the command but
+        # omits the exit-status slot (it never ran), so it can't be mislabelled.
+        self.write(readonly=True, color=False)
+        first = self.proc("> git branch")["block"].split("\n")[0]
+        self.assertIn("[cwd]", first)          # mode tag
+        self.assertIn("$ git branch", first)   # command echoed in the header
+        self.assertNotIn("exit", first)        # but NO exit status
+        # a real run DOES show a status
+        self.assertIn("exit 0", self.proc("> ls")["block"].split("\n")[0])
+
     def test_refusal_offers_safer_path_when_one_exists(self):
         # Where a read-only way exists, the message points to it (not only --allow).
         self.write(readonly=True, color=False)
