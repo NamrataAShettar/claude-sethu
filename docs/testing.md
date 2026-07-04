@@ -37,43 +37,56 @@ Your installed plugin only reflects released versions, so a feature branch won't
 appear in the prompt box until you point the plugin at your local checkout. Then
 `git checkout <branch>` + `/reload-plugins` tests that branch.
 
-sethu's marketplace is named `sethu`, so the installed copy and a local one can't
-both use that name at once. Two ways to switch over:
+The repo's marketplace is named `sethu` (your installed plugin shows as
+`sethu@sethu`), so an install from a local or branch source and the released one
+can't both hold that name at once. Pick an option by what you're doing:
 
-### Option A: local marketplace (persists across sessions)
+| Option | Tests | Setup / cleanup | Best for |
+| --- | --- | --- | --- |
+| **A. local marketplace** | your **live local files** | swap the `sethu` marketplace out, restore when done | ongoing local dev, flipping branches often |
+| **B. `--plugin-dir` flag** | your **live local files** | **none** (per session; just relaunch without it) | a quick, throwaway test of local changes |
+| **C. branch URL** | the **pushed** branch (a snapshot) | swap + restore, like A | reviewing a pushed PR branch as-is |
 
-```
-/plugin marketplace remove sethu               # free the name
-/plugin marketplace add /path/to/claude-sethu  # your working copy
-/plugin install sethu
-/reload-plugins
-```
+Substitute your own checkout path for `/path/to/claude-sethu` below. The `/plugin …`
+lines are in-session slash commands; the same works from a terminal as
+`claude plugin …` (e.g. `claude plugin marketplace add`).
 
-The install references the live files, so to switch branches:
+### Option A: local marketplace (persistent local dev)
+
+1. Point the `sethu` marketplace at your working copy:
+   ```
+   /plugin marketplace remove sethu
+   /plugin marketplace add /path/to/claude-sethu
+   /plugin install sethu
+   /reload-plugins
+   ```
+2. It references your **live files**, so to test a branch, check it out and reload:
+   ```bash
+   git checkout <branch>     # in a terminal
+   ```
+   ```
+   /reload-plugins           # in Claude Code
+   ```
+3. When done, **restore the released plugin** (see below).
+
+### Option B: `--plugin-dir` launch flag (quick throwaway, no cleanup)
+
+A `--plugin-dir` copy overrides the installed plugin for that session only, so
+there's nothing to remove/add and **nothing to undo**. Check out the branch you
+want, then start Claude Code with the flag:
 
 ```bash
-git checkout <branch>     # in a terminal
-```
-```
-/reload-plugins           # in Claude Code
-```
-
-### Option B: launch flag (no marketplace changes)
-
-A `--plugin-dir` copy takes precedence over the installed one for that session, so
-no remove/add is needed:
-
-```bash
+git checkout <branch>
 claude --plugin-dir /path/to/claude-sethu
 ```
 
-Then `git checkout <branch>` + `/reload-plugins` as above.
+Switch branches during the session with `git checkout <branch>` + `/reload-plugins`.
+To go back to the released plugin, just exit and start `claude` normally next time.
 
-### Option C: a pushed branch, without local editing
+### Option C: branch URL (review a pushed PR)
 
-Because the repo's `marketplace.json` is named `sethu` on every branch, this
-collides with your installed `sethu` marketplace, so you swap it the same way as
-Option A. It tests the **pushed** branch (a snapshot), not uncommitted local edits:
+Tests the **pushed** branch (a snapshot), not uncommitted local edits. Same
+`sethu`-name swap as A:
 
 ```
 /plugin marketplace remove sethu
@@ -82,12 +95,11 @@ Option A. It tests the **pushed** branch (a snapshot), not uncommitted local edi
 /reload-plugins
 ```
 
-Use the full git URL with `#<branch>`; the `owner/repo#branch` shorthand isn't
-reliable yet. To pull new pushes to that branch: `/plugin marketplace update
-sethu`. When done, restore the released plugin with the steps below (removing the
-branch marketplace alone leaves you with sethu uninstalled).
+Use the full git URL with `#<branch>` (the `owner/repo#branch` shorthand isn't
+reliable yet). Pull newer pushes with `/plugin marketplace update sethu`. When
+done, **restore the released plugin** (below).
 
-### Restore the released plugin
+### Restore the released plugin (after Option A or C)
 
 ```
 /plugin marketplace remove sethu
@@ -96,5 +108,8 @@ branch marketplace alone leaves you with sethu uninstalled).
 /reload-plugins
 ```
 
-**Note:** a local install follows whatever branch is currently checked out, so make
-sure the repo is on the branch you want before you `/reload-plugins`.
+Option B needs no restore. **Note:** a local install follows whatever branch is
+checked out, so make sure the repo is on the branch you want before `/reload-plugins`.
+
+If an `install` step reports sethu is already installed, run `/plugin uninstall
+sethu` first, then re-run it.
