@@ -19,6 +19,11 @@ with one, either don't make it or update this doc deliberately.
 - **Color = sethu's *interpretation*; plain = *relayed* content.** Color the things
   sethu understands and gives meaning to (exit status, mode, warnings). Never
   recolor the command's own output — it's data sethu just carries.
+- **Don't color routine messages.** Refusals and info (interactive, isn't-allowed,
+  cd, state-builtin) are the branded icon + `·` separator + **plain body** — they're
+  normal outcomes, not alarms. Reserve color for *status* (✓/✗ exit) and *genuine
+  problems* (e.g. the garbled-output warning is amber). Coloring every routine
+  refusal would be warning fatigue.
 - **`>` is free/private, `>>` costs tokens.** The whole product is about keeping
   output out of the model's context. Make the token cost visible at the moment it's
   incurred; never hide it.
