@@ -71,12 +71,21 @@ Then `git checkout <branch>` + `/reload-plugins` as above.
 
 ### Option C: a pushed branch, without local editing
 
+Because the repo's `marketplace.json` is named `sethu` on every branch, this
+collides with your installed `sethu` marketplace, so you swap it the same way as
+Option A. It tests the **pushed** branch (a snapshot), not uncommitted local edits:
+
 ```
+/plugin marketplace remove sethu
 /plugin marketplace add https://github.com/NamrataAShettar/claude-sethu.git#<branch>
+/plugin install sethu
+/reload-plugins
 ```
 
 Use the full git URL with `#<branch>`; the `owner/repo#branch` shorthand isn't
-reliable yet.
+reliable yet. To pull new pushes to that branch: `/plugin marketplace update
+sethu`. When done, restore the released plugin with the steps below (removing the
+branch marketplace alone leaves you with sethu uninstalled).
 
 ### Restore the released plugin
 
