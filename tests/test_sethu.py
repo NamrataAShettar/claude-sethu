@@ -159,6 +159,22 @@ class TestHookGate(Base):
         self.assertTrue(sethu_hook._maybe_sethu("!! ls"))
         self.assertFalse(sethu_hook._maybe_sethu("regular text"))
 
+    def test_fast_path_skips_engine_import(self):
+        # Every-prompt perf guard: a NON-sethu prompt must NOT import _engine (the
+        # heavy module). Deterministic stand-in for "sethu's overhead is sub-ms" —
+        # wall-clock isn't CI-stable, this is.
+        self.write()
+        hook = os.path.join(HOOKS, "sethu_hook.py")
+
+        def imports_engine(prompt):
+            r = subprocess.run([sys.executable, "-X", "importtime", hook],
+                               input=prompt, capture_output=True, text=True,
+                               env=dict(os.environ, SETHU_CONFIG=self.cfg))
+            return "_engine" in r.stderr   # -X importtime writes to stderr
+
+        self.assertFalse(imports_engine('{"prompt":"just a normal message"}'))
+        self.assertTrue(imports_engine('{"prompt":"> ls"}'))  # loaded only on demand
+
 
 class TestInteractiveFn(unittest.TestCase):
     def test(self):

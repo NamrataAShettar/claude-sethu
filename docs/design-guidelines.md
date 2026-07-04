@@ -85,6 +85,15 @@ with one, either don't make it or update this doc deliberately.
   message. sethu's own overhead should stay sub-millisecond.
 - **Measure before optimizing.** Interpreter startup dominates; most in-process work
   is already sub-microsecond. Don't add per-prompt work for a micro-optimization.
+- **Verify no degradation with the invariant test, not ms thresholds.** The fast path
+  skipping `_engine` is pinned by `test_fast_path_skips_engine_import` (deterministic).
+  Wall-clock is env-dependent (interpreter startup dominates and varies by machine),
+  so it's a **reference, not a CI gate**. Reference baseline (2026-07-03, one machine):
+  normal-prompt overhead ≈ 32 ms of which **sethu's own code is < 1 ms**; `> cmd`
+  +4 ms (bash spawn); warm shell ≈ 38 ms; `_maybe_sethu` ≈ 11 µs;
+  `is_readonly_safe`/`_matches` sub-µs. Re-measure with
+  `python3 -X importtime hooks/sethu_hook.py` and a `timeit` loop over `process()`
+  when touching a hot path.
 
 ## Storage
 
@@ -93,6 +102,11 @@ with one, either don't make it or update this doc deliberately.
 - **Every temp artifact sethu writes must be swept.** Anything under
   `sethu-*` (output logs, launch scripts, sockets, cwd files) is age-swept by
   `_sweep_temp`; a new artifact type must be added to it. Nothing grows unbounded.
+- **Verify no degradation with tests, not numbers.** Storage guarantees are
+  deterministic, so pin them: every `sethu-*` artifact type is proven swept by
+  `TestSweep` (extend it when you add an artifact), and captured output is byte-capped
+  (a cap test — arriving with the ST1 fix). No wall-clock or size "baseline" needed —
+  these are exact assertions.
 
 ---
 
