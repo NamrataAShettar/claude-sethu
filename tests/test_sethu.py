@@ -18,6 +18,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
                                          TestRefusalMessages
   --unallow                              TestConfig                             [x]
   --launch / --unlaunch                  TestLaunch, TestConfig                 [x]
+  truthful add/remove + empty/multispace TestManagementCLI                     [x]
   --mode stateless/cwd/shell             TestModeSwitching, TestCwdMode,        [x]
                                          TestShellMode
   --readonly on/off                      TestReadonlyFn, TestSafety,            [x]
@@ -348,6 +349,44 @@ class TestManagementCLI(Base):
 
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))
+
+    def test_allow_truthful_add_vs_duplicate(self):
+        # M4/UX8: ✔ added only when it actually changed; a duplicate says so.
+        self.write(allow=[])
+        self.assertIn("✔ added to allow", self._out(["--allow", "npm test"]))
+        out = self._out(["--allow", "npm test"])           # second time
+        self.assertIn("already allowed", out)
+        self.assertNotIn("✔ added", out)
+
+    def test_unallow_truthful_present_vs_absent(self):
+        # M4: ✔ removed only when the entry existed; otherwise "not in the list".
+        self.write(allow=["npm test"])
+        self.assertIn("✔ removed", self._out(["--unallow", "npm test"]))
+        out = self._out(["--unallow", "neverexisted"])
+        self.assertIn("not in the allowlist", out)
+        self.assertNotIn("✔ removed", out)
+
+    def test_unlaunch_absent_is_truthful(self):
+        self.write(launch=[])
+        self.assertIn("not in the launch list", self._out(["--unlaunch", "nope"]))
+
+    def test_multispace_entry_is_removable(self):
+        # M4: a multi-space allow must be removable via the (space-collapsing)
+        # subcommand style — both canonicalize to one entry.
+        self.write(allow=[])
+        self._out(["--allow", "a   b"])                     # stored canonical
+        cfg = _engine.load_config()
+        self.assertEqual(cfg["allow"], ["a b"])
+        self.assertIn("✔ removed", self._out(["--unallow", "a b"]))
+        self.assertEqual(_engine.load_config()["allow"], [])
+
+    def test_empty_arg_says_nothing_not_config_dump(self):
+        # UX10: `--allow ""` must say so, not silently dump the whole config.
+        self.write(allow=[])
+        for flag in ("--allow", "--unallow", "--launch", "--unlaunch"):
+            out = self._out([flag, ""])
+            self.assertIn("nothing to", out, flag)
+            self.assertNotIn("sethu config", out, flag)  # not the --runner view
 
     def test_readonly_list_prints_set_and_guards(self):
         out = self._out(["--readonly-list"])

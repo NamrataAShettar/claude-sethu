@@ -1119,35 +1119,51 @@ def main(argv=None):
 
     cfg = load_config()
     changed = False
-    if a.allow:
-        if a.allow not in cfg["allow"]:
-            cfg["allow"].append(a.allow)
-        print(f"✔ added to allow: {a.allow!r}")
-        changed = True
-    if a.launch:
-        val = a.launch
-        if val not in cfg["launch"]:
-            cfg["launch"].append(val)
-        changed = True
-        # "launch" is a verb — open it now, not just register it. From here on
-        # `> <val>` opens a terminal too (that's what the launch list is for).
-        status = launch_in_terminal(val)
-        note = ("  Note: the launched terminal is a plain shell — it does NOT "
-                "share sethu's allowlist / mode / cwd.")
-        if status:
-            print(f"✔ {status} — opened {val!r}. From now on `> {val}` opens a "
-                  f"terminal too.\n{note}")
+    noop = False  # printed truthful feedback but changed nothing → don't dump config
+    if a.allow is not None:
+        # Canonicalize whitespace so `--allow "a   b"` and `unallow a b` are the
+        # same entry (the subcommand path already collapses spaces); a stored entry
+        # you can't remove was the bug.
+        val = " ".join(a.allow.split())
+        if not val:
+            print("nothing to allow (the command was empty)."); noop = True
+        elif val in cfg["allow"]:
+            print(f"already allowed: {val!r} (no change)."); noop = True
         else:
-            print(f"✔ added {val!r} to the launch list — `> {val}` will open it in a "
-                  f"terminal. (Couldn't open one now — no tmux pane, and auto-open "
-                  f"is macOS/tmux only; run `{val}` in your terminal.)\n{note}")
-    for field, key in (("unallow", "allow"), ("unlaunch", "launch")):
-        val = getattr(a, field)
-        if val:
-            if val in cfg[key]:
-                cfg[key].remove(val)
-            print(f"✔ removed from {key}: {val!r}")
+            cfg["allow"].append(val)
+            print(f"✔ added to allow: {val!r}"); changed = True
+    if a.launch is not None:
+        val = " ".join(a.launch.split())
+        if not val:
+            print("nothing to launch (the command was empty)."); noop = True
+        else:
+            # "launch" is a verb — open it now, not just register it. From here on
+            # `> <val>` opens a terminal too (that's what the launch list is for).
+            if val not in cfg["launch"]:
+                cfg["launch"].append(val)
             changed = True
+            status = launch_in_terminal(val)
+            note = ("  Note: the launched terminal is a plain shell — it does NOT "
+                    "share sethu's allowlist / mode / cwd.")
+            if status:
+                print(f"✔ {status} — opened {val!r}. From now on `> {val}` opens a "
+                      f"terminal too.\n{note}")
+            else:
+                print(f"✔ added {val!r} to the launch list — `> {val}` will open it in "
+                      f"a terminal. (Couldn't open one now — no tmux pane, and auto-open "
+                      f"is macOS/tmux only; run `{val}` in your terminal.)\n{note}")
+    for field, key, name in (("unallow", "allow", "allowlist"),
+                             ("unlaunch", "launch", "launch list")):
+        val = getattr(a, field)
+        if val is not None:
+            val = " ".join(val.split())
+            if not val:
+                print(f"nothing to remove (the command was empty)."); noop = True
+            elif val in cfg[key]:
+                cfg[key].remove(val)
+                print(f"✔ removed from {key}: {val!r}"); changed = True
+            else:
+                print(f"not in the {name}: {val!r} (nothing removed)."); noop = True
     if a.mode:
         cfg["mode"] = a.mode
         killed = kill_daemons()  # start the new mode from a clean slate
@@ -1198,6 +1214,8 @@ def main(argv=None):
     if changed:
         save_config(cfg)
         return
+    if noop:
+        return  # we already said "already allowed" / "not in list" / "nothing to …"
     _print_config(cfg)  # default / --runner: show current config
 
 
