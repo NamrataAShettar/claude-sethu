@@ -50,6 +50,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   hook output JSON shapes                TestHookOutput                         [x]
   python3-missing shim (run.sh)          TestPython3Shim                        [x]
   icon constant + header separator       TestIcon                               [x]
+  header format (dot-sep, status/runs)   TestHeaderFormat                       [x]
   every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
   malformed config: type + value guard   TestConfig                             [x]
   unterminated-quote command refused     TestHookOutput                         [x]
@@ -283,6 +284,27 @@ class TestManagementCLI(Base):
         self.assertIn(_engine.ICON, err)
         self.assertIn("sethu: error:", err)
         self.assertIn("options menu", err)
+
+
+class TestHeaderFormat(Base):
+    """Pins the exact header across permutations (color off), so a spacing or
+    separator regression fails here instead of by eye. Catches the class of bug
+    where a part (e.g. ⚠trust) wasn't `·`-separated."""
+    def test_run_header(self):
+        self.write(readonly=True, color=False)
+        h = self.proc("> ls")["block"].split("\n")[0]
+        self.assertEqual(h, "|^=^| · [cwd] · ✓ exit 0 · $ ls")
+
+    def test_refusal_header_omits_status(self):
+        self.write(readonly=True, color=False)
+        h = self.proc("> git branch")["block"].split("\n")[0]
+        self.assertEqual(h, "|^=^| · [cwd] · $ git branch")
+
+    def test_trust_segment_is_dot_separated(self):
+        # regression: ⚠trust used to be space-glued to the [mode] tag.
+        self.write(mode="shell", trust=True, readonly=False, color=False)
+        h = self.proc("> claude")["block"].split("\n")[0]  # interactive refusal
+        self.assertEqual(h, "|^=^| · [shell] · ⚠trust · $ claude")
 
 
 class TestFullScreenTUI(Base):

@@ -77,13 +77,14 @@ def max_lines(cfg):
 # failures, distinguishable from blue. Off via `sethu --color off` or the
 # NO_COLOR env var. Only the header is colored — the command output is untouched.
 _ANSI = {
-    "ok": "38;5;75",       # sky blue   — success (exit 0)
-    "fail": "1;38;5;203",  # bold red   — nonzero exit (errors stand out)
-    "warn": "38;5;214",    # amber      — no exit code (timeout/unknown)
-    "tag": "38;5;37",      # teal       — the [mode] tag
-    "trust": "38;5;208",   # orange     — the ⚠trust warning
-    "cmd": "1",            # bold       — the command that ran
-    "dim": "2",            # dim        — separators ( · $ )
+    "ok": "38;5;75",       # sky blue    — success (exit 0)
+    "fail": "1;38;5;203",  # bold red    — nonzero exit (errors stand out)
+    "warn": "38;5;214",    # amber       — no exit code (timeout/unknown)
+    "icon": "1;38;5;37",   # bold teal   — the |^=^| brand mark (pops vs the tag)
+    "tag": "38;5;37",      # teal        — the [mode] tag
+    "trust": "38;5;208",   # orange      — the ⚠trust warning
+    "cmd": "1",            # bold        — the command that ran
+    "dim": "2",            # dim         — separators ( · $ )
 }
 
 
@@ -102,7 +103,7 @@ def _c(text, key, on):
 def _msg(text, on):
     """A standalone sethu message with no command context (bare `>` help), prefixed
     with the branded icon + dim separator."""
-    return f"{_c(ICON, 'tag', on)} {_c('·', 'dim', on)} {text}"
+    return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
 
 
 def _header(mode, trust_on, mark_status, cmd, on):
@@ -110,7 +111,7 @@ def _header(mode, trust_on, mark_status, cmd, on):
     Every part is dim-`·`-separated. `mark_status` is the coloured `✓ exit 0`-style
     string for a RUN, or None for a message that never ran (refusal/cd/interactive):
     then the status slot is omitted, so a non-run is never given a fake exit status."""
-    segs = [_c(ICON, "tag", on), _c(f"[{mode}]", "tag", on)]
+    segs = [_c(ICON, "icon", on), _c(f"[{mode}]", "tag", on)]
     if trust_on:
         segs.append(_c("⚠trust", "trust", on))
     if mark_status is not None:
@@ -976,7 +977,7 @@ class _Parser(argparse.ArgumentParser):
     def error(self, message):
         on = _color_on(load_config())
         sys.stderr.write(
-            _c(ICON, "tag", on) + " "
+            _c(ICON, "icon", on) + " "
             + _c(f"sethu: error: {message}", "fail", on) + "\n"
             + _c("Run `sethu` for the options menu.", "dim", on) + "\n")
         sys.exit(2)
