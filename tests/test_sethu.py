@@ -40,6 +40,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
   git globals / exec-c / --ext-diff      TestReadonlyFn                         [x]
+  --readonly-list + honest refusal       TestManagementCLI, TestReadonlyFn      [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
   long-output truncation + temp file     TestTruncate                           [x]
@@ -171,6 +172,16 @@ class TestReadonlyFn(unittest.TestCase):
                       _engine._why_refused("git -c core.pager=x log", cfg))
         self.assertIn("--ext-diff",
                       _engine._why_refused("git log --ext-diff", cfg))
+
+    def test_why_refused_unknown_is_honest(self):
+        # An unrecognized command is genuinely read-only but not in our set — the
+        # refusal must say "doesn't recognize", not the false "isn't a read-only
+        # command", and point to the list.
+        msg = _engine._why_refused("bat file.txt", {"readonly": True})
+        self.assertIn("doesn't recognize", msg)
+        self.assertIn("bat", msg)
+        self.assertIn("--readonly-list", msg)
+        self.assertNotIn("isn't a read-only command", msg)
 
 
 class TestHookGate(Base):
@@ -325,6 +336,15 @@ class TestManagementCLI(Base):
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))
 
+    def test_readonly_list_prints_set_and_guards(self):
+        out = self._out(["--readonly-list"])
+        for t in ["ls", "git", "jq",                       # curated names shown
+                  "--ext-diff", "git writes",              # flag guards explained
+                  'sethu --allow "<command>"']:            # the escape hatch
+            self.assertIn(t, out, t)
+        # Sorted → stable output (set iteration order is not).
+        self.assertEqual(out, self._out(["--readonly-list"]))
+
     def test_bad_arg_error_is_branded(self):
         # A bad flag gives a branded, concise error (icon + 'error:' + menu
         # pointer), not argparse's plain usage wall.
@@ -408,7 +428,7 @@ class TestRefusalMessages(Base):
         cases = {
             "git branch": "change the repo",
             "sort -o out f": "writes a file",
-            "npm test": "isn't a read-only command",
+            "npm test": "doesn't recognize `npm`",
             "ls; rm -rf ~": "joined by",
         }
         for cmd, why in cases.items():
@@ -1170,7 +1190,7 @@ class TestCoverageEnforcement(unittest.TestCase):
         engine = open(_engine.__file__).read()
         tests = open(__file__).read()
         calls = re.findall(r"add_argument\((.*?)\)", engine, re.DOTALL)
-        args = {opt for body in calls for opt in re.findall(r'"(--[a-z]+)"', body)}
+        args = {opt for body in calls for opt in re.findall(r'"(--[a-z-]+)"', body)}
         self.assertTrue(args, "no CLI args discovered — regex likely broke")
         missing = sorted(a for a in args if a not in tests)
         self.assertEqual(missing, [], f"CLI args with no test reference: {missing}")

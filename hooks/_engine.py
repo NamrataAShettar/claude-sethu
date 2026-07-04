@@ -30,6 +30,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 
 # Defaults referenced in more than one place live here as named constants, so a
@@ -827,8 +828,9 @@ def _why_refused(cmd, cfg):
                 "`&`, or `|`, redirects (`>`), or `$(…)`. Run the parts as separate "
                 "`>` commands, or allow the exact command below.")
     if prog not in READONLY:
-        return (f"`{prog}` isn't a read-only command, so read-only mode won't run it "
-                f"automatically.")
+        return (f"sethu doesn't recognize `{prog}` as a read-only command, so "
+                f"read-only mode won't run it automatically. See what it does run "
+                f"with `sethu --readonly-list`.")
     return ""
 
 
@@ -981,6 +983,7 @@ Let a command run (read-only ones like ls / cat / git log run already):
   sethu --allow "cmd"      permit a command that writes or isn't read-only (undo: --unallow)
   sethu --launch "cmd"     interactive (vim/top/ssh) or long-running: opens a terminal (undo: --unlaunch)
   sethu --readonly off     stop auto-running read-only commands
+  sethu --readonly-list    show which commands run without --allow
   sethu --trust on         run ANY `>` command, no allowlist (footgun)
 
 How commands run:
@@ -1030,6 +1033,29 @@ class _Parser(argparse.ArgumentParser):
         sys.exit(2)
 
 
+def readonly_list_text():
+    """On-demand, human-readable answer to 'what does read-only mode run without
+    --allow, and why is my command not on it' — the companion to the 'not
+    recognized' refusal. Names are sorted so the output is stable (set iteration
+    order isn't). Not a semantic analyzer: it's this curated set plus the flag
+    guards, and anything else is refused with a reason + a one-line --allow."""
+    names = textwrap.fill("  ".join(sorted(READONLY)), width=74,
+                          initial_indent="  ", subsequent_indent="  ")
+    guards = (
+        "  sort -o/--output · xxd -r · date -s · find -exec/-delete/-fprint · "
+        "git writes (push/commit/…) · git -c/--config-env/--exec-path · "
+        "git --ext-diff/--output"
+    )
+    return (
+        "read-only mode runs these commands without asking (no --allow needed):\n\n"
+        f"{names}\n\n"
+        "…but only without their write/exec flags, which stay refused:\n"
+        f"{guards}\n\n"
+        "Anything else is refused with a reason. To run one anyway:\n"
+        '  sethu --allow "<command>"'
+    )
+
+
 def main(argv=None):
     args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
     if not args_list:
@@ -1048,6 +1074,8 @@ def main(argv=None):
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
     p.add_argument("--readonly", choices=["on", "off"],
                    help="auto-allow a curated set of read-only commands")
+    p.add_argument("--readonly-list", action="store_true", dest="readonly_list",
+                   help="list the commands read-only mode runs without --allow")
     p.add_argument("--trust", choices=["on", "off"],
                    help="bypass the allowlist — run ANY command (footgun)")
     p.add_argument("--rc", choices=["on", "off"],
@@ -1063,6 +1091,9 @@ def main(argv=None):
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
     a = p.parse_args(args_list)
 
+    if a.readonly_list:
+        print(readonly_list_text())
+        return
     if a.restart:
         print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
         return
