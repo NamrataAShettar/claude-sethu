@@ -977,6 +977,15 @@ class TestLaunch(Base):
         self.assertEqual(_engine._osa_str('say "hi"'), 'say \\"hi\\"')
         self.assertEqual(_engine._osa_str('a\\b'), 'a\\\\b')
 
+    def test_launch_command_script_self_deletes(self):
+        # ST3: the last-resort .command file holds the raw command (may carry
+        # secrets), so it removes itself the moment Terminal runs it — before the
+        # command executes — rather than lingering until the 7-day sweep.
+        s = _engine._launch_command_script("aws login --token SECRET", "/bin/zsh")
+        self.assertIn('rm -f "$0"', s)
+        self.assertIn("aws login --token SECRET", s)
+        self.assertLess(s.index('rm -f "$0"'), s.index("aws login"))  # delete first
+
     def test_launch_registers_and_opens_now(self):
         # `sethu --launch vi` must both add vi to the launch list AND try to open
         # it immediately (the verb is an action, not just registration).

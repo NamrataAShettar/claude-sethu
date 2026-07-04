@@ -661,7 +661,7 @@ def launch_in_terminal(cmd):
         try:
             fd, path = tempfile.mkstemp(prefix="sethu-launch-", suffix=".command")
             with os.fdopen(fd, "w") as f:
-                f.write(f"#!/bin/bash\n{cmd}\nexec {shell} -l\n")
+                f.write(_launch_command_script(cmd, shell))
             # 0700, not 0755 — the script holds the raw command (which may carry
             # secrets) and `open` only needs owner-execute. Don't widen perms on a
             # user-command file sitting in a shared temp dir.
@@ -671,6 +671,15 @@ def launch_in_terminal(cmd):
         except Exception:
             pass
     return None
+
+
+def _launch_command_script(cmd, shell):
+    """Body of the .command last-resort launch file. It removes ITSELF first, so
+    the raw command — which may carry secrets — doesn't linger on disk in a shared
+    temp dir once Terminal has read the file. Unlinking a file that's already
+    executing is safe on Unix (the running shell keeps its open handle); the 7-day
+    _sweep_temp is only the backstop for a file that's never opened."""
+    return f'#!/bin/bash\nrm -f "$0"\n{cmd}\nexec {shell} -l\n'
 
 
 # ── persistent shell (shell mode) ─────────────────────────────────────────────
