@@ -120,7 +120,8 @@ def _sweep_temp(now, force=False):
     for a 7-day GC (cost scales with temp-dir size, not sethu's file count).
     A live daemon manages its own socket, but a SIGKILL'd one leaves the socket
     file behind; anything 7+ days old is certainly dead (far past the 30-min idle
-    timeout), so it's swept too."""
+    timeout), so it's swept too. Per-session cwd files are swept on the same age
+    rule (a session idle for 7 days is long gone)."""
     tmp = tempfile.gettempdir()
     sentinel = os.path.join(tmp, "sethu-swept")
     if not force:
@@ -145,7 +146,8 @@ def _sweep_temp(now, force=False):
         n = e.name
         if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
                 (n.startswith("sethu-launch-") and n.endswith(".command")) or
-                (n.startswith("sethu-") and n.endswith(".sock"))):
+                (n.startswith("sethu-") and n.endswith(".sock")) or
+                n.startswith("sethu-cwd-")):
             continue
         try:
             if now - e.stat().st_mtime > _TEMP_MAX_AGE:
@@ -255,6 +257,16 @@ def load_config():
                     cfg[k] = user[k]
     except Exception:
         pass
+    # Value-level normalization (beyond type), so a hand-edited config can't crash
+    # or misbehave: list entries must be strings (else `_matches` does str+int),
+    # mode must be a real mode, and the prefix can't be empty (which would match
+    # every prompt).
+    cfg["allow"] = [str(x) for x in cfg["allow"]]
+    cfg["launch"] = [str(x) for x in cfg["launch"]]
+    if cfg["mode"] not in MODES:
+        cfg["mode"] = DEFAULTS["mode"]
+    if not cfg["prefix"]:
+        cfg["prefix"] = DEFAULTS["prefix"]
     return cfg
 
 

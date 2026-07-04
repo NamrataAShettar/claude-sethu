@@ -50,10 +50,10 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   python3-missing shim (run.sh)          TestPython3Shim                        [x]
   icon constant                          TestIcon                               [x]
   every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
-  malformed config falls back per key    TestConfig                             [x]
+  malformed config: type + value guard   TestConfig                             [x]
   unterminated-quote command refused     TestHookOutput                         [x]
   first-run hint skips if unwritable     TestFirstRunHint                       [x]
-  orphaned socket swept when stale       TestSweep                              [x]
+  orphaned socket + cwd file swept       TestSweep                              [x]
 """
 import json
 import os
@@ -504,21 +504,22 @@ class TestSweep(unittest.TestCase):
         old = os.path.join(tmp, "sethu-out-deadbeef0001.log")
         cmd = os.path.join(tmp, "sethu-launch-deadbeef0002.command")
         sock = os.path.join(tmp, "sethu-deadbeef0004-p0.sock")   # orphaned socket
+        cwd = os.path.join(tmp, "sethu-cwd-deadbeef0005")        # dead-session cwd
         fresh = os.path.join(tmp, "sethu-out-deadbeef0003.log")
-        for p in (old, cmd, sock, fresh):
+        for p in (old, cmd, sock, cwd, fresh):
             open(p, "w").close()
         self.addCleanup(lambda: [os.path.exists(p) and os.unlink(p)
-                                 for p in (old, cmd, sock, fresh)])
+                                 for p in (old, cmd, sock, cwd, fresh)])
         now = os.path.getmtime(fresh) + 100
         # Backdate the stale files well past the max age.
         stale = now - _engine._TEMP_MAX_AGE - 1000
-        os.utime(old, (stale, stale))
-        os.utime(cmd, (stale, stale))
-        os.utime(sock, (stale, stale))
+        for p in (old, cmd, sock, cwd):
+            os.utime(p, (stale, stale))
         _engine._sweep_temp(now, force=True)   # bypass the once-an-hour throttle
         self.assertFalse(os.path.exists(old), "stale .log should be swept")
         self.assertFalse(os.path.exists(cmd), "stale .command should be swept")
         self.assertFalse(os.path.exists(sock), "stale orphaned .sock should be swept")
+        self.assertFalse(os.path.exists(cwd), "stale cwd file should be swept")
         self.assertTrue(os.path.exists(fresh), "fresh file must be kept")
 
     def test_sweep_throttled(self):
@@ -878,6 +879,18 @@ class TestConfig(Base):
         with contextlib.redirect_stdout(io.StringIO()):
             _engine.main(["--allow", "foo"])   # previously AttributeError
         self.assertIn("foo", _engine.load_config()["allow"])
+
+    def test_malformed_config_values_normalized(self):
+        # Beyond type: non-string list entries are coerced (else `_matches` does
+        # str + int → TypeError), a bad mode falls back, and an empty prefix falls
+        # back (an empty prefix would match every prompt).
+        with open(self.cfg, "w") as f:
+            json.dump({"allow": [1, 2], "mode": "banana", "prefix": ""}, f)
+        c = _engine.load_config()
+        self.assertEqual(c["allow"], ["1", "2"])
+        self.assertEqual(c["mode"], "cwd")
+        self.assertEqual(c["prefix"], ">")
+        self.proc("> ls")   # non-string allowlist previously crashed process()
 
     def test_setter_flags_roundtrip(self):
         # The management CLI persists each config-setter flag.
