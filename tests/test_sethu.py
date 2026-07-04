@@ -48,7 +48,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
   python3-missing shim (run.sh)          TestPython3Shim                        [x]
-  icon constant                          TestIcon                               [x]
+  icon constant + header separator       TestIcon                               [x]
   every CLI arg is referenced (guard)    TestCoverageEnforcement                [x]
   malformed config: type + value guard   TestConfig                             [x]
   unterminated-quote command refused     TestHookOutput                         [x]
@@ -426,6 +426,11 @@ class TestIcon(Base):
         self.assertIn(_engine.ICON, self.proc("> echo hi")["block"])
         # The pipe-to-Claude context stays clean (icon is for your eyes only).
         self.assertNotIn(_engine.ICON, self.proc(">> echo hi")["context"])
+
+    def test_separator_between_icon_and_tag(self):
+        # A dim `·` splits the icon from the [mode] tag so they don't blend (UX7).
+        self.write(readonly=True, color=False)
+        self.assertIn(_engine.ICON + " · [cwd]", self.proc("> ls")["block"])
 
 
 class TestColor(Base):

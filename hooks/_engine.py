@@ -849,7 +849,8 @@ def process(prompt, data):
         tag += " " + _c("⚠trust", "trust", on)
     mark_status = _c(f"{mark} {status}", state, on)
     icon = _c(ICON, "tag", on)
-    header = f"{icon} {tag} {mark_status} {_c('·', 'dim', on)} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
+    dot = _c("·", "dim", on)  # dim separator so the teal icon and [mode] tag don't blend
+    header = f"{icon} {dot} {tag} {mark_status} {dot} {_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}"
 
     # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
     # The full text is written to a per-session file; the note points at it.
