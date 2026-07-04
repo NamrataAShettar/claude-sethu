@@ -39,6 +39,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
                                          TestRefusalMessages
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
+  git globals / exec-c / --ext-diff      TestReadonlyFn                         [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
   long-output truncation + temp file     TestTruncate                           [x]
@@ -134,6 +135,42 @@ class TestReadonlyFn(unittest.TestCase):
         for c in ["sort f", "sort -r f", "sort -n f", "xxd f", "date",
                   "git diff", "git show HEAD", "find . -follow", "find . -name x"]:
             self.assertTrue(_engine.is_readonly_safe(c), c)
+
+    def test_git_global_options_readonly(self):
+        # M2: a read-only git subcommand stays read-only behind leading globals.
+        for c in ["git -C /tmp status", "git --no-pager log", "git -p diff",
+                  "git --git-dir=/r/.git log", "git -C /tmp --no-pager show HEAD",
+                  "git --literal-pathspecs ls-files"]:
+            self.assertTrue(_engine.is_readonly_safe(c), c)
+
+    def test_git_global_options_still_refuse_writes(self):
+        # M2: globals must not smuggle a write subcommand past the gate…
+        for c in ["git -C /tmp push", "git --no-pager reset --hard",
+                  "git --git-dir=/r/.git commit -m x"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_git_exec_globals_refused(self):
+        # M2/security: -c / --config-env / --exec-path can run arbitrary code even
+        # in front of a read-only subcommand, so they're never read-only.
+        for c in ["git -c core.pager=evil log", "git -c alias.x='!sh' status",
+                  "git --exec-path=/evil status",
+                  "git --config-env=core.pager=X log"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_git_ext_diff_refused(self):
+        # L1 (shipped with M2): --ext-diff runs the configured external diff program.
+        for c in ["git log --ext-diff", "git show --ext-diff HEAD",
+                  "git -C /tmp diff --ext-diff"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_why_refused_git_globals(self):
+        # M2: refusal reasons stay accurate through leading globals.
+        cfg = {"readonly": True}
+        self.assertIn("push", _engine._why_refused("git --no-pager push", cfg))
+        self.assertIn("arbitrary code",
+                      _engine._why_refused("git -c core.pager=x log", cfg))
+        self.assertIn("--ext-diff",
+                      _engine._why_refused("git log --ext-diff", cfg))
 
 
 class TestHookGate(Base):

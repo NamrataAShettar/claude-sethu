@@ -485,6 +485,40 @@ READONLY_GIT = {
 _DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
+# git global options that may appear BEFORE the subcommand (`git -C x status`).
+_GIT_GLOBAL_NOARG = frozenset({
+    "-p", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
+    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+    "--icase-pathspecs", "--no-optional-locks",
+})
+# globals that consume the next token as their value (also accept `--flag=value`).
+_GIT_GLOBAL_ARG = frozenset({"-C", "--git-dir", "--work-tree", "--namespace"})
+
+
+def _git_subcommand(toks):
+    """Resolve git's subcommand, skipping any leading global options so that
+    `git -C /x --no-pager status` is understood as `status`.
+    Returns (sub, safe): `sub` is the subcommand token ('' if none is present);
+    `safe` is False when an exec-capable global was seen — `-c key=value`,
+    `--config-env`, or `--exec-path` can run arbitrary code (`git -c core.pager=…`,
+    `-c alias.x='!sh' x`, `--exec-path=/evil sub`), and any unrecognized option is
+    treated the same way, so such a command is never read-only."""
+    i = 1
+    while i < len(toks):
+        t = toks[i]
+        if not t.startswith("-"):
+            return (t, True)                       # the subcommand
+        if t in _GIT_GLOBAL_NOARG:
+            i += 1
+        elif t in _GIT_GLOBAL_ARG:
+            i += 2                                  # skip the flag and its value
+        elif any(t.startswith(f + "=") for f in _GIT_GLOBAL_ARG):
+            i += 1                                  # `--git-dir=…` (value attached)
+        else:
+            return ("", False)                      # -c / --config-env / --exec-path / unknown
+    return ("", True)                               # ran out: no subcommand
+
+
 def _flag_present(toks, flags):
     """True if any token is one of `flags` (also matching `--flag=x` and a
     combined short flag like `-oFILE`)."""
@@ -509,11 +543,12 @@ def is_readonly_safe(cmd):
             return False
         prog = os.path.basename(toks[0])
         if prog == "git":
-            sub = toks[1] if len(toks) > 1 else ""
-            if sub not in READONLY_GIT:
+            sub, safe = _git_subcommand(toks)
+            if not safe or sub not in READONLY_GIT:
                 return False
-            # read-only subcommands can still write a file via --output=FILE.
-            if _flag_present(toks, ("--output",)):
+            # A read-only subcommand can still write a file (`--output=FILE`) or run
+            # an external program (`--ext-diff` invokes the configured diff.external).
+            if _flag_present(toks, ("--output", "--ext-diff")):
                 return False
         elif prog == "find":
             if any(t in _FIND_WRITE_PRIMARIES for t in toks):
@@ -768,10 +803,18 @@ def _why_refused(cmd, cfg):
         return ""
     prog = os.path.basename(toks[0])
     if prog == "git":
-        sub = toks[1] if len(toks) > 1 else ""
+        sub, safe = _git_subcommand(toks)
+        if not safe:
+            return ("that uses `git -c`, `--config-env`, or `--exec-path`, which can "
+                    "run arbitrary code, so read-only mode won't run it. Drop that "
+                    "option, or allow the exact command below.")
         if sub and sub not in READONLY_GIT:
             return (f"`git {sub}` can change the repo, so read-only mode doesn't run "
                     f"it automatically (read-only git is status/log/diff/show/blame/…).")
+        if sub in READONLY_GIT and _flag_present(toks, ("--ext-diff",)):
+            return ("`git --ext-diff` runs an external diff program, so read-only "
+                    "mode won't run it automatically. Drop `--ext-diff` to run it "
+                    "read-only, or allow the exact command below.")
     if prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
         return (f"`{prog}` is read-only, but this flag writes a file, so read-only "
                 f"mode won't run it automatically. Drop the flag to run it read-only "
