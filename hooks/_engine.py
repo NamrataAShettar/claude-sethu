@@ -1163,12 +1163,15 @@ def main(argv=None):
             note = ("  Note: the launched terminal is a plain shell — it does NOT "
                     "share sethu's allowlist / mode / cwd.")
             if status:
-                print(f"✔ {status} — opened {val!r}. From now on `> {val}` opens a "
-                      f"terminal too.\n{note}")
+                print(f"✔ launched {val!r} ({status}) AND added it to the launch list. "
+                      f"That's persistent, so from now on `> {val}` opens a terminal "
+                      f"instead of running captured. Undo with `sethu --unlaunch "
+                      f"{val!r}`.\n{note}")
             else:
-                print(f"✔ added {val!r} to the launch list — `> {val}` will open it in "
-                      f"a terminal. (Couldn't open one now — no tmux pane, and auto-open "
-                      f"is macOS/tmux only; run `{val}` in your terminal.)\n{note}")
+                print(f"✔ added {val!r} to the launch list (persistent), so from now on "
+                      f"`> {val}` opens a terminal. Couldn't open one right now (no tmux "
+                      f"pane; auto-open is macOS/tmux only), so run `{val}` in your "
+                      f"terminal. Undo with `sethu --unlaunch {val!r}`.\n{note}")
     for field, key, name in (("unallow", "allow", "allowlist"),
                              ("unlaunch", "launch", "launch list")):
         val = getattr(a, field)

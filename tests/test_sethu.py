@@ -1009,6 +1009,24 @@ class TestLaunch(Base):
         self.assertEqual(opened, ["vi"])               # opened now
         self.assertIn("vi", _engine.load_config()["launch"])  # and registered
 
+    def test_launch_message_states_both_effects(self):
+        # UX5: --launch has a surprising DOUBLE effect (opens now AND permanently
+        # registers). The message must make both, and the persistence, explicit.
+        import io, contextlib
+        orig = _engine.launch_in_terminal
+        _engine.launch_in_terminal = lambda c: "↗ opened in a new tmux pane"
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                _engine.main(["--launch", "vi"])
+        finally:
+            _engine.launch_in_terminal = orig
+        out = buf.getvalue()
+        self.assertIn("launch list", out)      # registered
+        self.assertIn("persistent", out)       # …and it's persistent
+        self.assertIn("opened", out.lower())   # …and opened now
+        self.assertIn("--unlaunch", out)       # how to undo
+
 
 class TestFirstRunHint(Base):
     def test_fires_once_then_silent(self):
