@@ -408,6 +408,14 @@ INTERACTIVE = {
 # they're fine for the captured runner. `python script.py` is batch; `python` is
 # a REPL. `-i` forces the prompt open, so it stays interactive.
 _REPL = {"python", "python3", "node", "irb", "ipython"}
+# REPL flags that make the interpreter run-and-exit instead of dropping into a
+# prompt — so the command is batch (safe to capture), not interactive. -c/-m take
+# code to run; the version/help flags print and exit. Prompt-preserving flags
+# (-q/-u/-O/-b, python's verbose -v) are deliberately absent: with no script they
+# still open a REPL. node's -v/-e/-p are batch there but clash with python's
+# meanings, so they're kept node-only.
+_REPL_BATCH_FLAGS = {"-c", "-m", "-V", "--version", "-h", "--help"}
+_REPL_BATCH_FLAGS_NODE = {"-v", "-e", "--eval", "-p", "--print"}
 
 # Shell builtins that set state (env vars, aliases). They only persist in shell
 # mode; in cwd/stateless each command is a throwaway subprocess, so running one is
@@ -432,14 +440,16 @@ def is_interactive(cmd):
     if prog in _REPL:
         args = toks[1:]
         if "-i" in args:
-            return True  # explicit interactive flag
-        # Any non-flag argument (a script path) or -c/-m means batch mode.
-        for i, a in enumerate(args):
-            if a in ("-c", "-m"):
+            return True  # explicit interactive flag wins
+        batch = _REPL_BATCH_FLAGS
+        if prog == "node":
+            batch = _REPL_BATCH_FLAGS | _REPL_BATCH_FLAGS_NODE
+        # A run-and-exit flag (-c/-m/--version/--help), or any non-flag arg (a
+        # script path / -c's code), means it runs and exits → batch, not a REPL.
+        for a in args:
+            if a in batch or not a.startswith("-"):
                 return False
-            if not a.startswith("-"):
-                return False  # a script path → runs and exits
-        return True  # bare `python`, or only passive flags → REPL
+        return True  # bare interpreter, or only prompt-preserving flags → REPL
     return prog in INTERACTIVE
 
 

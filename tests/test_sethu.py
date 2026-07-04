@@ -35,7 +35,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   bare `sethu` (help menu)               TestManagementCLI                      [x]
   branded/colored CLI errors             TestManagementCLI                      [x]
   subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
-  interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
+  interactive guard (REPL/version/help)  TestInteractiveFn, TestSafety,         [x]
                                          TestRefusalMessages
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
@@ -245,6 +245,19 @@ class TestInteractiveFn(unittest.TestCase):
                   "node app.js", 'node -e "console.log(1)"',
                   "python -u worker.py"]:
             self.assertFalse(_engine.is_interactive(c), c)
+
+    def test_version_help_flags_are_batch(self):
+        # M3: version/help flags print and exit — batch, not an interactive REPL,
+        # so they must run captured (not get the wrong --launch hint).
+        for c in ["python --version", "python -V", "python3 --help", "python -h",
+                  "node --version", "node -v", "node -p 1", "node --eval x"]:
+            self.assertFalse(_engine.is_interactive(c), c)
+
+    def test_prompt_preserving_flags_still_interactive(self):
+        # …but a bare interpreter with only prompt-preserving flags still opens a
+        # REPL (python -v is verbose, NOT version), so it stays interactive.
+        for c in ["python -q", "python -u", "python -O", "python -v"]:
+            self.assertTrue(_engine.is_interactive(c), c)
 
 
 class TestSafety(Base):
