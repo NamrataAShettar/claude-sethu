@@ -330,12 +330,19 @@ class TestFullScreenTUI(Base):
         self.assertIn("interactive", self.proc("> claude --plugin-dir ~/x")["block"])
 
     def test_unknown_tui_alt_screen_gets_hint(self):
-        # A program that switches to the alt screen at runtime is garbled when
-        # captured; sethu detects the escape and points at --launch.
+        # A TUI captured mid-draw emits the alt-screen escape AND fails/times out;
+        # sethu detects the escape (on a non-clean exit) and points at --launch.
         self.write(mode="stateless", trust=True, readonly=False, color=False)
-        b = self.proc(r"> printf '\033[?1049hUI'")["block"]
+        b = self.proc(r"> printf '\033[?1049hUI'; false")["block"]  # escape, exit 1
         self.assertIn("full-screen program", b)
         self.assertIn("--launch", b)
+
+    def test_alt_screen_on_clean_exit_no_hint(self):
+        # A command that legitimately prints those bytes and exits 0 must NOT trip
+        # the hint (false-positive guard).
+        self.write(mode="stateless", trust=True, readonly=False, color=False)
+        self.assertNotIn("full-screen program",
+                         self.proc(r"> printf '\033[?1049hUI'")["block"])
 
     def test_plain_output_gets_no_hint(self):
         self.write(readonly=True, color=False)
@@ -1044,6 +1051,8 @@ class TestHookOutput(Base):
         out = json.loads(self._run('sethu allow "oops').stdout)
         self.assertEqual(out["decision"], "block")
         self.assertIn("quotes", out["reason"])
+        self.assertIn(_engine.ICON, out["reason"])         # branded like other messages
+        self.assertIn("sethu: error:", out["reason"])      # matches the CLI error format
         self.assertNotIn('"oops', _engine.load_config()["allow"])
 
     def test_run_command_emits_block(self):

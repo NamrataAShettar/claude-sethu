@@ -146,8 +146,10 @@ def _sweep_temp(now, force=False):
     via a sentinel file, since scanning the temp dir on every command is wasteful
     for a 7-day GC (cost scales with temp-dir size, not sethu's file count).
     A live daemon manages its own socket, but a SIGKILL'd one leaves the socket
-    file behind; anything 7+ days old is certainly dead (far past the 30-min idle
-    timeout), so it's swept too. Per-session cwd files are swept on the same age
+    file behind; anything 7+ days old is dead in practice (the daemon idles out
+    after 30 min, so nothing lives that long — the sole exception, a session used
+    continuously for 7+ days, just loses shell state and respawns on the next
+    command), so it's swept too. Per-session cwd files are swept on the same age
     rule (a session idle for 7 days is long gone)."""
     tmp = tempfile.gettempdir()
     sentinel = os.path.join(tmp, "sethu-swept")
@@ -905,9 +907,11 @@ def process(prompt, data):
         )
         return {"context": ctx}
     body = f"{header}\n{shown}"
-    if _looks_full_screen(out):
-        # An unknown full-screen TUI slipped past the INTERACTIVE list; its output
-        # is garbled captured. Say so and point at a real terminal.
+    if code != 0 and _looks_full_screen(out):
+        # A full-screen TUI captured mid-draw emits the alt-screen escape AND fails or
+        # times out (never a clean exit 0) — so gate on that to avoid a false positive
+        # when a command legitimately prints those bytes and succeeds. Point at a real
+        # terminal.
         hint = _c(f"⚠ that looks like a full-screen program, captured output "
                   f"garbles. Run it in a real terminal: sethu --launch \"{cmd}\"",
                   "warn", on)
