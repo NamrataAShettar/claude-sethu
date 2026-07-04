@@ -110,10 +110,9 @@ def _header(mode, trust_on, mark_status, cmd, on):
     Every part is dim-`·`-separated. `mark_status` is the coloured `✓ exit 0`-style
     string for a RUN, or None for a message that never ran (refusal/cd/interactive):
     then the status slot is omitted, so a non-run is never given a fake exit status."""
-    tag = _c(f"[{mode}]", "tag", on)
+    segs = [_c(ICON, "tag", on), _c(f"[{mode}]", "tag", on)]
     if trust_on:
-        tag += " " + _c("⚠trust", "trust", on)
-    segs = [_c(ICON, "tag", on), tag]
+        segs.append(_c("⚠trust", "trust", on))
     if mark_status is not None:
         segs.append(mark_status)
     segs.append(f"{_c('$', 'dim', on)} {_c(cmd, 'cmd', on)}")
