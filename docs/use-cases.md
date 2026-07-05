@@ -70,14 +70,17 @@ sethu --allow "pip show"→  > pip show requests
 ```
 
 ## 7. Persistent shell workflows (`sethu --mode shell`)
-Set up an environment once, then run a series of commands that share it:
+Set up an environment once, then run a series of commands that share it. `export`
+and `cd` (and other state builtins) work out of the box in shell mode; `source` runs
+a file's contents, so you allow it once.
 
 ```text
 sethu --mode shell
-> source .venv/bin/activate
-> export API_ENV=staging
-> cd services/api
->> pytest -q tests/smoke   # runs in that exact venv/dir, Claude sees the result
+sethu --allow source          # source runs a file — allow it once (venv activation)
+> source .venv/bin/activate    # activates, and persists to the commands below
+> export API_ENV=staging       # sets shell state, out of the box
+> cd services/api              # navigation, out of the box
+>> pytest -q tests/smoke       # runs in that exact venv/dir (allow pytest first)
 ```
 
 ## 8. Logs & data inspection

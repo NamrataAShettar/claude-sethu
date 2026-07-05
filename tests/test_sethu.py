@@ -25,7 +25,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
                                          TestConfig, TestTrust
   --trust on/off                         TestTrust                              [x]
   --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
-  state builtins hint at shell mode      TestStateBuiltinHint                   [x]
+  state builtins auto-run; source gated  TestStateBuiltinHint                   [x]
   --color on/off                         TestColor, TestConfig                  [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
@@ -935,16 +935,41 @@ class TestShellMode(Base):
 
 
 class TestStateBuiltinHint(Base):
-    def test_state_builtin_in_nonshell_hints_shell_mode(self):
-        # export/source/alias/… only persist in shell mode; cwd/stateless should
-        # proactively point there instead of silently no-op'ing or refusing.
+    def test_safe_state_builtin_in_nonshell_hints_shell_mode(self):
+        # UX1/UX4: export/alias/unset auto-run without --allow, but only persist in
+        # shell mode; cwd/stateless say so (a no-op note) instead of running nothing.
         for m in ("cwd", "stateless"):
             self.write(mode=m, readonly=True, color=False)
-            for c in ["export FOO=1", "source venv/bin/activate", "alias g=git",
-                      ". env/bin/activate", "unset PATHX"]:
+            for c in ["export FOO=1", "alias g=git", "unalias g", "unset PATHX"]:
                 b = self.proc("> " + c)["block"]
                 self.assertIn("shell mode", b, f"{m}: {c}")
                 self.assertIn("--mode shell", b, f"{m}: {c}")
+
+    def test_safe_state_builtin_autoruns_in_shell_mode_without_allow(self):
+        # UX1: in shell mode they auto-run WITHOUT --allow and persist.
+        sid = "test-ux1-persist"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", readonly=True, allow=[], color=False)  # no --allow
+        self.proc("> export FOO=ux1", sid=sid)
+        self.assertIn("ux1", self.proc("> echo $FOO", sid=sid)["block"])
+
+    def test_source_needs_allow_not_shell_hint(self):
+        # UX1: source/. execute a file's contents (arbitrary code), so they are NOT
+        # auto-permitted — they need --allow, with a message that says why (in every
+        # mode, since the risk isn't mode-dependent).
+        for m in ("cwd", "shell"):
+            self.write(mode=m, readonly=True, color=False)
+            for c in ["source venv/bin/activate", ". env/bin/activate"]:
+                b = self.proc("> " + c)["block"]
+                self.assertIn("--allow", b, f"{m}: {c}")
+                self.assertIn("contents of a file", b, f"{m}: {c}")
+
+    def test_state_builtin_autopermit_is_chain_guarded(self):
+        # UX1 security: the auto-permit only applies to a simple builtin — a chained
+        # or substituted one is NOT auto-run.
+        self.write(mode="shell", readonly=True, color=False)
+        for c in ["export A=1; rm -rf x", "export A=$(rm x)", "unset X && rm y"]:
+            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
 
 
 class TestRcAliases(Base):

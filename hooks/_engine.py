@@ -448,10 +448,14 @@ _REPL_BATCH_FLAGS_NODE = {"-v", "-e", "--eval", "-p", "--print"}
 # every other interpreter `-v` prints the version and exits (batch).
 _PYTHON_REPL = {"python", "python3", "python2", "pypy", "ipython"}
 
-# Shell builtins that set state (env vars, aliases). They only persist in shell
-# mode; in cwd/stateless each command is a throwaway subprocess, so running one is
-# a silent no-op — better to point the user at shell mode than let it vanish.
-_STATE_BUILTINS = {"export", "source", ".", "alias", "unalias", "unset"}
+# Shell builtins that only SET STATE (env vars, aliases) — they don't execute any
+# external code, so they auto-run without --allow in every mode (chain-guarded).
+# They only persist in shell mode, though; in cwd/stateless each command is a
+# throwaway subprocess, so we show a "won't persist" note instead of running a no-op.
+_SAFE_STATE_BUILTINS = {"export", "alias", "unalias", "unset"}
+# source / . EXECUTE the contents of a file (arbitrary code), so — unlike the state
+# builtins — they are NOT auto-run; they need an explicit --allow (see _why_refused).
+_EXEC_BUILTINS = {"source", "."}
 
 # A program that switched to the terminal's alternate screen buffer is a
 # full-screen TUI (its captured output is garbled). Catches TUIs not in the
@@ -855,6 +859,9 @@ def _why_refused(cmd, cfg):
     if not toks:
         return ""
     prog = os.path.basename(toks[0])
+    if prog in _EXEC_BUILTINS:
+        return (f"`{prog}` runs the contents of a file (arbitrary code), so it isn't "
+                f"auto-run. Allow it once with `sethu --allow {prog}`.")
     if prog == "git":
         sub, safe = _git_subcommand(toks)
         if not safe:
@@ -946,17 +953,21 @@ def process(prompt, data):
                 "capture it (it would hang). Allowlisting won't help. Open it in a "
                 f"terminal instead:\n  sethu --launch \"{cmd}\"", on)}
 
-    # State-setting builtins only stick in shell mode; in cwd/stateless they run in
-    # a throwaway subprocess and vanish. Point the user at shell mode up front
-    # instead of silently no-op'ing (or refusing with an unrelated reason).
-    if mode != "shell" and cmd.split() and cmd.split()[0] in _STATE_BUILTINS:
+    # State-setting builtins (export/alias/unset) auto-run without --allow — they
+    # only set shell state, no external code (chain-guarded). But they only persist
+    # in shell mode; in cwd/stateless each command is a throwaway subprocess, so
+    # instead of running a no-op we say it won't persist. (source/. are NOT here —
+    # they execute a file's contents, so they need --allow; see _why_refused.)
+    prog = cmd.split()[0] if cmd.split() else ""
+    safe_builtin = prog in _SAFE_STATE_BUILTINS and not _is_chain_unsafe(cmd)
+    if safe_builtin and mode != "shell":
         return {"block": _reply(mode, trust_on, cmd,
-                f"only persists in shell mode. In `{mode}` mode each command runs in a "
-                f"fresh subprocess, so this wouldn't carry to the next one. Switch with "
-                f"`sethu --mode shell` (add `sethu --rc on` to load your aliases and "
-                f"functions).", on)}
+                f"`{prog}` sets shell state, but in `{mode}` mode each command runs in a "
+                f"fresh shell so it wouldn't persist. Keep it by switching to shell mode: "
+                f"`sethu --mode shell` (add `sethu --rc on` for your aliases/functions).",
+                on)}
 
-    allowed = trust_on or _matches(cmd, cfg["allow"]) or (
+    allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
     if not _is_bare_cd(cmd) and not allowed:
@@ -1103,10 +1114,11 @@ def readonly_list_text():
     sorted so the output is stable (set iteration order isn't). Kept short: the
     per-command refusal explains any specific write/exec-flag guard in context, so
     this doesn't enumerate them all."""
-    # `cd` isn't in READONLY (it's the always-exempt navigation builtin) but it does
-    # run without --allow, so list it in sorted order with the rest rather than as a
-    # dangling footnote.
-    names = textwrap.fill("  ".join(sorted(READONLY | {"cd"})), width=74,
+    # cd (navigation) and the state builtins (export/alias/unalias/unset) aren't in
+    # READONLY but also run without --allow, so list them in sorted order with the
+    # rest rather than as dangling footnotes.
+    extra = {"cd"} | _SAFE_STATE_BUILTINS
+    names = textwrap.fill("  ".join(sorted(READONLY | extra)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
     return (
         "these run without asking (no --allow needed):\n\n"
