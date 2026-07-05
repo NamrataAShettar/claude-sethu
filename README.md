@@ -15,9 +15,10 @@ output yourself for **free** (it never touches the model). Share it with Claude
 only when you actually want it to act on the result.
 
 ```text
-> git status          # runs it, shows YOU the output (zero tokens, model never sees it)
->> git status         # runs it AND sends the output to Claude (costs tokens, on purpose)
-sethu --allow "npm test"   # read-only commands work already; allowlist the ones that write
+> grep -n TODO src/   # runs it, shows YOU the output (zero tokens, model never sees it)
+>> grep -n TODO src/  # runs it AND sends the output to Claude (costs tokens, on purpose)
+sethu --allow git     # opt a whole tool in (git/find/npm/…); safe tools like grep/ls/cat run already
+> git status          # now runs (git was allowed above)
 ```
 
 Type a command prefixed with `>` as an ordinary message. A `UserPromptSubmit`
@@ -39,9 +40,9 @@ to spot.
 - **🐚 A shell in the chat.** `sethu --mode shell` gives you a persistent shell:
   `cd`, `export`, activate a venv, then run commands that share that state,
   without leaving the Claude window.
-- **🛡️ Safe by default.** Read-only mode is **on out of the box**, so inspection
-  commands just work while anything that writes or chains is refused until you
-  explicitly allow it.
+- **🛡️ Safe by default.** **Gated** out of the box: a curated set of safe inspection
+  tools (`ls`, `cat`, `grep`, `jq`, …) just works, while everything else is refused
+  until you `--allow` that tool (or `--trust on` for everything).
 - **🪶 No package installs.** Pure Python standard library, so there's no `pip`,
   no npm, and no third-party packages to manage. (It does need `python3`, see
   Requirements.)
@@ -76,8 +77,8 @@ Inside a Claude Code session:
 /reload-plugins
 ```
 
-That's it. Read-only commands like `> ls` work immediately. To write, allowlist
-the command: `sethu --allow "npm test"`.
+That's it. Gated tools like `> ls` / `> grep` work immediately. For anything else
+(git, find, npm, …), allow the tool once: `sethu --allow git`.
 
 (You manage sethu right in the prompt box: type bare `sethu` for the options menu.
 No terminal setup needed.)
@@ -93,11 +94,11 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | --- | --- |
 | `> cmd` | run it, show **you** the output (free) |
 | `>> cmd` | run it and **send output to Claude** (costs tokens) |
-| `sethu --allow "cmd"` | permit a writing command (read-only ones already work) |
-| `sethu --unallow "cmd"` | remove a command from the allowlist |
+| `sethu --allow "tool"` | permit a whole tool, any flags (`git`, `find`, `npm`, …); gated ones already run |
+| `sethu --unallow "tool"` | remove a tool from the allowlist |
 | `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
-| `sethu --readonly off` | stop auto-allowing read-only commands |
-| `sethu --trust on` | ⚠ run **anything**, no allowlist (footgun) |
+| `sethu --gated-list` | tools that run without asking (built-in + ones you allowed) |
+| `sethu --trust on` | ⚠ run **anything**, gate off (footgun) |
 | `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
 | `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
@@ -132,19 +133,21 @@ source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
 
 ## 🛡️ Safety
 
-- **Read-only by default.** Inspection commands (`ls`, `cat`, `git log`, …) run,
-  while anything that writes, chains, or execs is refused until you
-  `sethu --allow` it.
+- **Gated by default.** A curated set of tools that are safe with *any* flags
+  (`ls`, `cat`, `grep`, `jq`, …) runs; everything else — including tools that *can*
+  write or exec (`git`, `find`, `npm`, …) — is refused until you `sethu --allow` that
+  tool. No per-flag policing: a tool is either flag-safe (gated) or you allow it whole.
 - **The runner executes in your shell without Claude Code's per-command
-  permission prompts**, so keep the allowlist tight, like shell aliases.
-- **Injection-hardened.** An allowlisted command may only be followed by plain
+  permission prompts**, so keep the allowlist tight, like shell aliases. `--allow`-ing
+  a launcher (`git`, `sh`, `python`, …) permits *any* of its flags — sethu warns you.
+- **Injection-hardened.** An allowed/gated tool may only be followed by plain
   arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or substitution.
   Allowing `ls` does **not** allow `> ls; rm -rf ~`. (Metacharacters *inside
-  quotes* are fine, so `> python3 -c "import os; print(1)"` works.)
-- **Trust is opt-in.** `sethu --trust on` removes the allowlist entirely and
-  runs anything, a real footgun. It's off by default, warned loudly, and shown as
-  `⚠trust` in the status line while active.
-- **Read-only is a safe *default*, not a sandbox.** You can always run anything via
+  quotes* are fine, so once `python3` is allowed, `> python3 -c "import os; print(1)"` works.)
+- **Trust is the one safety knob.** `sethu --trust on` turns the gate off and runs
+  anything, a real footgun. Off by default (= gated), warned loudly, shown as
+  `⚠trust` while active.
+- **Gated is a safe *default*, not a sandbox.** You can always run anything via
   your terminal, `!`, `--allow`, or `--trust` — so it's a guardrail against
   surprises, not a security boundary. (One consequence is noted in the limits below.)
 
@@ -180,7 +183,7 @@ to do instead:
 | **Commands that prompt for input** (`npm install` conflicts, `apt install` "[Y/n]", `gh auth login`) | Even shell mode can't *type back* at a prompt. | Use non-interactive flags (`-y`, `--yes`, `DEBIAN_FRONTEND=noninteractive`) or `--launch`. |
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
 | **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
-| **Read-only git in an untrusted repo** | git runs programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …) on `status`/`diff` — git's behavior, same as your terminal. | Don't auto-inspect a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
+| **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …) — git's behavior, same as your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for
@@ -200,9 +203,9 @@ while Claude was still generating. sethu only fires on a prompt that *starts* a
 turn, so a `>` typed mid-response is read by the model (and costs tokens), not run
 by sethu. Send `> cmd` when Claude is idle.
 
-**"`X` isn't allowed to run."** sethu is read-only by default. The message tells you
-why (e.g. `git branch` can also write, `npm` isn't a read-only command). To permit
-it, `sethu --allow "X"`. If it's interactive (`vim`, a bare REPL), use
+**"`X` isn't in the gated set."** sethu is gated by default. The message tells you
+why (e.g. `git`/`npm` can write or run other programs, so they're not in the default
+set). To permit it, `sethu --allow X` (the whole tool). If it's interactive (`vim`, a bare REPL), use
 `sethu --launch "X"` instead (allowlisting can't make those run). To drop the
 guardrails entirely and run anything, there's `sethu --trust on`, but it's a
 footgun, so prefer allowlisting the specific commands you actually want.
@@ -266,7 +269,7 @@ Stdlib only, no dependencies:
 python3 -m unittest discover -s tests -v
 ```
 
-The suite covers the allowlist, read-only safety (injection and chaining refused),
+The suite covers the allowlist, gated safety (injection and chaining refused),
 the interactive guard, all three modes (including the persistent shell), the `>>`
 pipe, and config round-trips. Every feature and CLI argument maps to a test (a
 coverage table at the top of `tests/test_sethu.py`, guarded by a meta-test that

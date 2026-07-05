@@ -44,7 +44,7 @@ with one, either don't make it or update this doc deliberately.
 - **Refusals teach, and lead with the safest path.** Say *why* it was refused, then
   the safest way to make it work (drop the write flag, run parts separately) before
   the generic `--allow`. A refusal is a mini how-to, not a dead end. Where a
-  read-only alternative exists, show it; where none does, `--allow` is the honest
+  gated way exists, show it; where none does, `--allow <tool>` is the honest
   answer.
 - **Degrade gracefully.** Unknown interactive/full-screen programs → a `--launch`
   hint, not garbled bytes or a hang. Every failure ends with an actionable next
@@ -52,7 +52,7 @@ with one, either don't make it or update this doc deliberately.
 - **Truthful feedback.** Only report success when something actually changed
   (`✔ added` / `already allowed` / `not in list`, not always `✔`).
 - **Plain, natural language.** No em-dashes; commas/colons/parentheses instead.
-  Concrete over jargon ("read-only mode won't run it automatically", not "isn't
+  Concrete over jargon ("gated won't run it automatically", not "isn't
   auto-allowed"). Concise; say each thing once.
 
 ## Correctness
@@ -72,12 +72,12 @@ with one, either don't make it or update this doc deliberately.
 
 - **What auto-runs is mode-INDEPENDENT; mode only decides statefulness.** This is a
   load-bearing invariant — don't erode it:
-  - **Auto-runs without `--allow`, in every mode:** read-only commands (the `READONLY`
-    set) **plus** the set-a-variable/alias builtins (`export`/`alias`/`unalias`/`unset`),
-    all chain-guarded. None of these execute external code.
+  - **Auto-runs without `--allow`, in every mode:** the `GATED` tools **plus** the
+    set-a-variable/alias builtins (`export`/`alias`/`unalias`/`unset`), all chain-guarded.
+    None of these execute external code.
   - **Never auto-runs, in any mode:** anything that executes code — `source`/`.` (they
-    run a file's contents = arbitrary code) and every non-read-only program → requires
-    `--allow` or `--trust`.
+    run a file's contents = arbitrary code) and every non-gated tool → requires
+    `--allow` (the whole tool) or `--trust`.
   - `mode` (cwd/stateless/shell) changes only whether state *persists*, never *what is
     permitted*. A state builtin runs-and-persists in shell mode; in cwd/stateless it's a
     no-op, so show a concise "won't persist, use `--mode shell`" note (don't execute it,
@@ -85,10 +85,17 @@ with one, either don't make it or update this doc deliberately.
   - Do NOT make the auto-allow set mode-dependent (e.g. auto-permitting `source` only in
     shell mode) — it's confusing and, for `source`, it would open arbitrary execution in
     the default mode. If you're tempted to special-case a mode's permissions, don't.
-- **Read-only is decided by FLAGS, not just program names.** Every entry in the
-  `READONLY` set needs an explicit exec/write-flag policy (`fd -x`, `rg --pre`,
-  `yq -i`, `git --ext-diff` were misses). Auditing the whole set is part of any
-  change that touches it.
+- **The DEFAULT set is by TOOL and flag-safe; `--allow` is by TOOL at the user's
+  discretion.** A tool auto-runs *without* `--allow` (is in `GATED`, the built-in default)
+  only if NO flag/operand can make it write, delete, or exec — audited, enforced by
+  `TestGatedSetIsFlagSafe`. There is deliberately **no per-flag policing** — a flag
+  denylist is tedious AND leaky (it can't even see `uniq IN OUT` / `xxd IN OUT`
+  positional-write operands). Tools that CAN write/exec via a flag (`git`, `find`, `fd`,
+  `rg`, `sort`, `yq`, …) are NOT gated by default; the user opts into their **whole
+  surface** with `--allow <tool>` (a launcher-warning fires) — that's user discretion, not
+  a flag-safety claim, so a `--allow`'d tool need not be flag-safe. Gated is a safe
+  *default* / guardrail, not a sandbox — the user can run anything via their terminal, `!`,
+  `--allow`, or `--trust`.
 - **Allowlist stays injection-hardened.** An allowlisted command may only be
   followed by plain arguments — no unquoted pipe/redirect/`;`/`&&`/subshell/
   substitution. Allowing `ls` must never permit `ls; rm`.
@@ -113,7 +120,7 @@ with one, either don't make it or update this doc deliberately.
   so it's a **reference, not a CI gate**. Reference baseline (2026-07-03, one machine):
   normal-prompt overhead ≈ 32 ms of which **sethu's own code is < 1 ms**; `> cmd`
   +4 ms (bash spawn); warm shell ≈ 38 ms; `_maybe_sethu` ≈ 11 µs;
-  `is_readonly_safe`/`_matches` sub-µs. Re-measure with
+  `is_gated`/`_matches` sub-µs. Re-measure with
   `python3 -X importtime hooks/sethu_hook.py` and a `timeit` loop over `process()`
   when touching a hot path.
 

@@ -22,7 +22,7 @@ python3 - <<'PY'
 import sys, os, json, tempfile
 sys.path.insert(0, 'hooks'); import _engine
 p = os.path.join(tempfile.mkdtemp(), 'c.json')
-open(p, 'w').write(json.dumps({"mode": "cwd", "readonly": True, "color": True}))
+open(p, 'w').write(json.dumps({"mode": "cwd", "trust": False, "color": True}))
 os.environ['SETHU_CONFIG'] = p
 print(_engine.process("> ls", {"session_id": "s", "cwd": "/tmp"})["block"])
 PY

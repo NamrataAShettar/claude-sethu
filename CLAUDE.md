@@ -18,9 +18,9 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
   - *allow / launch matching* — `_matches` (exact/prefix), `_is_chain_unsafe` /
     `_has_unquoted_ops` / `_SUBST_META` (the injection-hardened chain guard).
   - *per-session cwd (cwd mode)* — `is_cd`, `resolve_cd`, `set_cwd`/`get_cwd`.
-  - *command execution* — read-only decision (`is_readonly_safe`, `READONLY`,
-    `_RO_WRITE_FLAGS`, `_DANGER`, `_git_subcommand`/`READONLY_GIT`, `_why_refused`,
-    `readonly_list_text`); interactive/TUI detection (`is_interactive`, `_REPL`,
+  - *command execution* — gated decision (`is_gated`, `GATED` (flag-safe tool set,
+    no flag logic), `_DANGER`, `_LAUNCHERS`, `_why_refused`, `gated_list_text`);
+    interactive/TUI detection (`is_interactive`, `_REPL`,
     `_REPL_BATCH_FLAGS`, `INTERACTIVE`, `_looks_full_screen`); `run_capture` (the
     captured runner); truncation + temp hygiene (`_truncate`, `_out_path`,
     `_sweep_temp`, `_output_path`); `launch_in_terminal` + `_launch_command_script`.
