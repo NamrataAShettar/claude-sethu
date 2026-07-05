@@ -6,7 +6,7 @@ hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
 API tokens (the model never sees it). `>>` instead pipes the output into
 Claude's context so it can act on the result.
 
-Safety: read-only mode is ON by default — inspection commands run, writes/chaining
+Safety: read-only is ON by default — inspection commands run, writes/chaining
 are refused. Writing commands run only once added to the allowlist (`--allow`).
 `cd` is exempt (it just moves the working directory, runs nothing).
 
@@ -81,7 +81,7 @@ _ANSI = {
     "ok": "38;5;75",       # sky blue    — success (exit 0)
     "fail": "1;38;5;203",  # bold red    — nonzero exit (errors stand out)
     "warn": "38;5;214",    # amber       — no exit code (timeout/unknown)
-    "icon": "1;38;5;37",   # bold teal   — the |^=^| brand mark (pops vs the tag)
+    "icon": "1;38;5;37",   # bold teal   — the |^=^| icon, so sethu is instantly recognized (pops vs the tag)
     "tag": "38;5;37",      # teal        — the [mode] tag
     "trust": "38;5;208",   # orange      — the ⚠trust warning
     "cmd": "1",            # bold        — the command that ran
@@ -103,7 +103,7 @@ def _c(text, key, on):
 
 def _msg(text, on):
     """A standalone sethu message with no command context (bare `>` help), prefixed
-    with the branded icon + dim separator."""
+    with the |^=^| icon + dim separator."""
     return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
 
 
@@ -228,7 +228,7 @@ def _welcome_marker():
 
 
 FIRST_RUN_HINT = (
-    f"{ICON} sethu is installed. Run terminal commands right from this box:\n"
+    f"{ICON} · sethu is installed. Run terminal commands right from this box:\n"
     "• `> git status`  → runs it, shows output to YOU only. Free (Claude never "
     "sees it).\n"
     "• `>> git status` → runs it AND sends the output to Claude (costs tokens).\n"
@@ -858,13 +858,13 @@ def _why_refused(cmd, cfg):
     if prog == "git":
         sub, safe = _git_subcommand(toks)
         if not safe:
-            return ("read-only mode won't auto-run git with `-c`/`--config-env`/"
+            return ("read-only won't auto-run git with `-c`/`--config-env`/"
                     "`--exec-path` or a repo-retargeting option (`-C`, `--git-dir`, "
                     "`--work-tree`), because a repo's own config can run external "
                     "programs even on `status`/`diff`. Allow the exact command below "
                     "if you trust it.")
         if sub and sub not in READONLY_GIT:
-            return (f"`git {sub}` can change the repo, so read-only mode doesn't run "
+            return (f"`git {sub}` can change the repo, so read-only doesn't run "
                     f"it automatically (read-only git is status/log/diff/show/blame/…).")
         if sub in READONLY_GIT and _flag_present(toks, ("--ext-diff",)):
             return ("`git --ext-diff` runs an external diff program, so read-only "
@@ -875,15 +875,15 @@ def _why_refused(cmd, cfg):
                 f"mode won't run it automatically. Drop the flag to run it read-only "
                 f"(the output just prints, for free), or allow it as-is below.")
     if prog == "find" and any(t in _FIND_WRITE_PRIMARIES for t in toks):
-        return ("This `find` action writes or runs a command, so read-only mode "
+        return ("This `find` action writes or runs a command, so read-only "
                 "won't run it automatically.")
     if _DANGER.search(cmd):
-        return ("For safety, read-only mode won't run commands joined by `;`, `&&`, "
+        return ("For safety, read-only won't run commands joined by `;`, `&&`, "
                 "`&`, or `|`, redirects (`>`), or `$(…)`. Run the parts as separate "
                 "`>` commands, or allow the exact command below.")
     if prog not in READONLY:
         return (f"sethu doesn't recognize `{prog}` as a read-only command, so "
-                f"read-only mode won't run it automatically. See what it does run "
+                f"read-only won't run it automatically. See what it does run "
                 f"with `sethu --readonly-list`.")
     return ""
 
@@ -897,7 +897,7 @@ def process(prompt, data):
     stripped = prompt.lstrip()
     if not prefix or not stripped.startswith(prefix):
         return {"passthrough": True}
-    on = _color_on(cfg)  # every sethu message below carries the branded icon
+    on = _color_on(cfg)  # every sethu message below carries the |^=^| icon
 
     # Opportunistically clear sethu's own stale temp files (saved output, launch
     # scripts) so storage doesn't bloat. Cheap, best-effort, only on our prompts.
@@ -1038,7 +1038,7 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""{ICON} sethu: run terminal commands from Claude's prompt box (no `!` needed).
+    return f"""{ICON} · sethu: run terminal commands from Claude's prompt box (no `!` needed).
 
   > cmd      run it, show the output to YOU only. Free (Claude never sees it).
   >> cmd     run it AND send the output to Claude (this costs tokens).
@@ -1085,38 +1085,35 @@ def normalize_argv(argv):
 
 
 class _Parser(argparse.ArgumentParser):
-    """argparse, but errors are branded and colored so they stand out (argparse's
+    """argparse, but errors carry the |^=^| icon and are colored so they stand out (argparse's
     default dumps a plain, monochrome usage wall that's hard to spot the error in).
     Points at the menu instead of re-printing every flag."""
     def error(self, message):
         on = _color_on(load_config())
         sys.stderr.write(
-            _c(ICON, "icon", on) + " "
+            _c(ICON, "icon", on) + " " + _c("·", "dim", on) + " "
             + _c(f"sethu: error: {message}", "fail", on) + "\n"
             + _c("Run `sethu` for the options menu.", "dim", on) + "\n")
         sys.exit(2)
 
 
 def readonly_list_text():
-    """On-demand answer to 'what does read-only mode run without --allow, and why
-    is my command not on it' — the companion to the 'not recognized' refusal. Names
-    are sorted so the output is stable (set iteration order isn't). Not a semantic
-    analyzer: it's this curated set plus the flag guards, and anything else is
-    refused with a reason + a one-line --allow."""
-    names = textwrap.fill("  ".join(sorted(READONLY)), width=74,
+    """On-demand answer to 'what does read-only run without --allow, and why is my
+    command not on it' — the companion to the 'not recognized' refusal. Names are
+    sorted so the output is stable (set iteration order isn't). Kept short: the
+    per-command refusal explains any specific write/exec-flag guard in context, so
+    this doesn't enumerate them all."""
+    # `cd` isn't in READONLY (it's the always-exempt navigation builtin) but it does
+    # run without --allow, so list it in sorted order with the rest rather than as a
+    # dangling footnote.
+    names = textwrap.fill("  ".join(sorted(READONLY | {"cd"})), width=74,
                           initial_indent="  ", subsequent_indent="  ")
-    guards = (
-        "  sort -o/--output · xxd -r · date -s/--set · find -exec/-delete/… · "
-        "git writes (push/commit/…) · git -c/--config-env/--exec-path · "
-        "git -C/--git-dir (foreign repo) · git --ext-diff/--output"
-    )
     return (
-        "read-only mode runs these commands without asking (no --allow needed):\n\n"
+        "these run without asking (no --allow needed):\n\n"
         f"{names}\n\n"
-        "…but only without their write/exec flags, which stay refused:\n"
-        f"{guards}\n\n"
-        "Anything else is refused with a reason. To run one anyway:\n"
-        '  sethu --allow "<command>"'
+        "A write or exec flag still needs --allow (e.g. `sort -o`, `git push`, "
+        "`find -exec`).\n"
+        'For anything else:  sethu --allow "<command>"'
     )
 
 
@@ -1139,7 +1136,7 @@ def main(argv=None):
     p.add_argument("--readonly", choices=["on", "off"],
                    help="auto-allow a curated set of read-only commands")
     p.add_argument("--readonly-list", action="store_true", dest="readonly_list",
-                   help="list the commands read-only mode runs without --allow")
+                   help="list the commands read-only runs without --allow")
     p.add_argument("--trust", choices=["on", "off"],
                    help="bypass the allowlist — run ANY command (footgun)")
     p.add_argument("--rc", choices=["on", "off"],
