@@ -141,9 +141,12 @@ source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
   arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or substitution.
   Allowing `ls` does **not** allow `> ls; rm -rf ~`. (Metacharacters *inside
   quotes* are fine, so `> python3 -c "import os; print(1)"` works.)
-- **Trust mode is opt-in.** `sethu --trust on` removes the allowlist entirely and
+- **Trust is opt-in.** `sethu --trust on` removes the allowlist entirely and
   runs anything, a real footgun. It's off by default, warned loudly, and shown as
   `⚠trust` in the status line while active.
+- **Read-only is a safe *default*, not a sandbox.** You can always run anything via
+  your terminal, `!`, `--allow`, or `--trust` — so it's a guardrail against
+  surprises, not a security boundary. (One consequence is noted in the limits below.)
 
 ---
 
@@ -177,6 +180,7 @@ to do instead:
 | **Commands that prompt for input** (`npm install` conflicts, `apt install` "[Y/n]", `gh auth login`) | Even shell mode can't *type back* at a prompt. | Use non-interactive flags (`-y`, `--yes`, `DEBIAN_FRONTEND=noninteractive`) or `--launch`. |
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
 | **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
+| **Read-only git in an untrusted repo** | git runs programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …) on `status`/`diff` — git's behavior, same as your terminal. | Don't auto-inspect a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for

@@ -12,7 +12,7 @@ the style:
 
 ---
 
-## 1. Git — the most common use (free, out of the box)
+## 1. Git — the most common use
 Peek at repo state constantly without paying tokens or cluttering the chat.
 
 ```text
@@ -30,14 +30,14 @@ Read-only git subcommands (`status`, `log`, `diff`, `show`, `blame`, `ls-files`,
 `git stash drop`, `git remote add`, `git config <key> <value>`), so they're **not**
 auto-allowed. Permit them explicitly if you want them: `sethu --allow "git branch"`.
 
-## 2. Filesystem & navigation (free)
+## 2. Filesystem & navigation
 ```text
 > ls -la                   > ls -R src
 > tree -L 2                > pwd
 > find . -name "*.py"      > du -sh *      > df -h
 ```
 
-## 3. Reading files & config (free — keeps big files out of context)
+## 3. Reading files & config (keeps big files out of context)
 ```text
 > cat package.json         > head -50 README.md
 > cat tsconfig.json        > grep -n "TODO" -r src
@@ -55,14 +55,14 @@ sethu --allow "npm test"   # allow once (it writes / hits the network)
 > pytest -q                > make lint       > tsc --noEmit
 ```
 
-## 5. Environment & system diagnostics (free)
+## 5. Environment & system diagnostics
 ```text
 > printenv | grep API      > echo $PATH
 > ps aux | grep node       > uname -a       > whoami
 > uptime                   > date           > which python3
 ```
 
-## 6. Dependencies (free for read-only; allow the rest)
+## 6. Dependencies (installs need --allow)
 ```text
 > cat requirements.txt     > jq '.dependencies' package.json
 sethu --allow "npm ls"  →  > npm ls --depth=0
@@ -70,24 +70,27 @@ sethu --allow "pip show"→  > pip show requests
 ```
 
 ## 7. Persistent shell workflows (`sethu --mode shell`)
-Set up an environment once, then run a series of commands that share it:
+Set up an environment once, then run a series of commands that share it. `export`
+and `cd` (and other state builtins) work out of the box in shell mode; `source` runs
+a file's contents, so you allow it once.
 
 ```text
 sethu --mode shell
-> source .venv/bin/activate
-> export API_ENV=staging
-> cd services/api
->> pytest -q tests/smoke   # runs in that exact venv/dir, Claude sees the result
+sethu --allow source          # source runs a file — allow it once (venv activation)
+> source .venv/bin/activate    # activates, and persists to the commands below
+> export API_ENV=staging       # sets shell state, out of the box
+> cd services/api              # navigation, out of the box
+>> pytest -q tests/smoke       # runs in that exact venv/dir (allow pytest first)
 ```
 
-## 8. Logs & data inspection (free)
+## 8. Logs & data inspection
 ```text
 > grep -c ERROR app.log    > tail -100 app.log
 > jq '.users | length' data.json
 >> tail -50 app.log        # "here's what's failing, diagnose it"
 ```
 
-## 9. Quick lookups / scratchpad (free)
+## 9. Quick lookups / scratchpad
 ```text
 > date     > cal     > df -h     > echo $HOME     > cat /etc/hosts
 ```

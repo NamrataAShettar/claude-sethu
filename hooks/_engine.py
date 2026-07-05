@@ -6,7 +6,7 @@ hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
 API tokens (the model never sees it). `>>` instead pipes the output into
 Claude's context so it can act on the result.
 
-Safety: read-only mode is ON by default — inspection commands run, writes/chaining
+Safety: read-only is ON by default — inspection commands run, writes/chaining
 are refused. Writing commands run only once added to the allowlist (`--allow`).
 `cd` is exempt (it just moves the working directory, runs nothing).
 
@@ -81,7 +81,7 @@ _ANSI = {
     "ok": "38;5;75",       # sky blue    — success (exit 0)
     "fail": "1;38;5;203",  # bold red    — nonzero exit (errors stand out)
     "warn": "38;5;214",    # amber       — no exit code (timeout/unknown)
-    "icon": "1;38;5;37",   # bold teal   — the |^=^| brand mark (pops vs the tag)
+    "icon": "1;38;5;37",   # bold teal   — the |^=^| icon, so sethu is instantly recognized (pops vs the tag)
     "tag": "38;5;37",      # teal        — the [mode] tag
     "trust": "38;5;208",   # orange      — the ⚠trust warning
     "cmd": "1",            # bold        — the command that ran
@@ -103,7 +103,7 @@ def _c(text, key, on):
 
 def _msg(text, on):
     """A standalone sethu message with no command context (bare `>` help), prefixed
-    with the branded icon + dim separator."""
+    with the |^=^| icon + dim separator."""
     return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
 
 
@@ -228,7 +228,7 @@ def _welcome_marker():
 
 
 FIRST_RUN_HINT = (
-    f"{ICON} sethu is installed. Run terminal commands right from this box:\n"
+    f"{ICON} · sethu is installed. Run terminal commands right from this box:\n"
     "• `> git status`  → runs it, shows output to YOU only. Free (Claude never "
     "sees it).\n"
     "• `>> git status` → runs it AND sends the output to Claude (costs tokens).\n"
@@ -356,6 +356,16 @@ def is_cd(cmd):
     return cmd == "cd" or cmd.startswith("cd ")
 
 
+def _is_bare_cd(cmd):
+    """A *simple* `cd` — the only form that's exempt from the allowlist. `cd` is
+    exempt because it 'runs nothing', but `is_cd` only checks the `cd ` prefix, and
+    in shell mode the raw string runs in the daemon — so `cd /tmp; rm -rf ~` would
+    execute the chain. Gate the exemption on the same chain guard the allowlist
+    uses: a chained/substituted `cd` is NOT bare and falls through to the normal
+    gate (which refuses it)."""
+    return is_cd(cmd) and not _is_chain_unsafe(cmd)
+
+
 # ── per-session working directory (cwd mode) ──────────────────────────────────
 def _cwd_file(sid):
     safe = "".join(c for c in (sid or "default") if c.isalnum() or c in "-_")
@@ -438,10 +448,14 @@ _REPL_BATCH_FLAGS_NODE = {"-v", "-e", "--eval", "-p", "--print"}
 # every other interpreter `-v` prints the version and exits (batch).
 _PYTHON_REPL = {"python", "python3", "python2", "pypy", "ipython"}
 
-# Shell builtins that set state (env vars, aliases). They only persist in shell
-# mode; in cwd/stateless each command is a throwaway subprocess, so running one is
-# a silent no-op — better to point the user at shell mode than let it vanish.
-_STATE_BUILTINS = {"export", "source", ".", "alias", "unalias", "unset"}
+# Shell builtins that only SET STATE (env vars, aliases) — they don't execute any
+# external code, so they auto-run without --allow in every mode (chain-guarded).
+# They only persist in shell mode, though; in cwd/stateless each command is a
+# throwaway subprocess, so we show a "won't persist" note instead of running a no-op.
+_SAFE_STATE_BUILTINS = {"export", "alias", "unalias", "unset"}
+# source / . EXECUTE the contents of a file (arbitrary code), so — unlike the state
+# builtins — they are NOT auto-run; they need an explicit --allow (see _why_refused).
+_EXEC_BUILTINS = {"source", "."}
 
 # A program that switched to the terminal's alternate screen buffer is a
 # full-screen TUI (its captured output is garbled). Catches TUIs not in the
@@ -845,16 +859,19 @@ def _why_refused(cmd, cfg):
     if not toks:
         return ""
     prog = os.path.basename(toks[0])
+    if prog in _EXEC_BUILTINS:
+        return (f"`{prog}` runs the contents of a file (arbitrary code), so it isn't "
+                f"auto-run. Allow it once with `sethu --allow {prog}`.")
     if prog == "git":
         sub, safe = _git_subcommand(toks)
         if not safe:
-            return ("read-only mode won't auto-run git with `-c`/`--config-env`/"
+            return ("read-only won't auto-run git with `-c`/`--config-env`/"
                     "`--exec-path` or a repo-retargeting option (`-C`, `--git-dir`, "
                     "`--work-tree`), because a repo's own config can run external "
                     "programs even on `status`/`diff`. Allow the exact command below "
                     "if you trust it.")
         if sub and sub not in READONLY_GIT:
-            return (f"`git {sub}` can change the repo, so read-only mode doesn't run "
+            return (f"`git {sub}` can change the repo, so read-only doesn't run "
                     f"it automatically (read-only git is status/log/diff/show/blame/…).")
         if sub in READONLY_GIT and _flag_present(toks, ("--ext-diff",)):
             return ("`git --ext-diff` runs an external diff program, so read-only "
@@ -865,15 +882,15 @@ def _why_refused(cmd, cfg):
                 f"mode won't run it automatically. Drop the flag to run it read-only "
                 f"(the output just prints, for free), or allow it as-is below.")
     if prog == "find" and any(t in _FIND_WRITE_PRIMARIES for t in toks):
-        return ("This `find` action writes or runs a command, so read-only mode "
+        return ("This `find` action writes or runs a command, so read-only "
                 "won't run it automatically.")
     if _DANGER.search(cmd):
-        return ("For safety, read-only mode won't run commands joined by `;`, `&&`, "
+        return ("For safety, read-only won't run commands joined by `;`, `&&`, "
                 "`&`, or `|`, redirects (`>`), or `$(…)`. Run the parts as separate "
                 "`>` commands, or allow the exact command below.")
     if prog not in READONLY:
         return (f"sethu doesn't recognize `{prog}` as a read-only command, so "
-                f"read-only mode won't run it automatically. See what it does run "
+                f"read-only won't run it automatically. See what it does run "
                 f"with `sethu --readonly-list`.")
     return ""
 
@@ -887,7 +904,7 @@ def process(prompt, data):
     stripped = prompt.lstrip()
     if not prefix or not stripped.startswith(prefix):
         return {"passthrough": True}
-    on = _color_on(cfg)  # every sethu message below carries the branded icon
+    on = _color_on(cfg)  # every sethu message below carries the |^=^| icon
 
     # Opportunistically clear sethu's own stale temp files (saved output, launch
     # scripts) so storage doesn't bloat. Cheap, best-effort, only on our prompts.
@@ -913,7 +930,9 @@ def process(prompt, data):
                 status or "couldn't open a terminal, run it in your own terminal.", on)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
-    if is_cd(cmd) and mode != "shell":
+    # Only a *bare* cd is exempt — a chained `cd x; …` is not, so it can't smuggle
+    # execution past the gate (see _is_bare_cd).
+    if _is_bare_cd(cmd) and mode != "shell":
         if mode == "cwd":
             target = resolve_cd(cmd[2:], base)
             if os.path.isdir(target):
@@ -934,20 +953,24 @@ def process(prompt, data):
                 "capture it (it would hang). Allowlisting won't help. Open it in a "
                 f"terminal instead:\n  sethu --launch \"{cmd}\"", on)}
 
-    # State-setting builtins only stick in shell mode; in cwd/stateless they run in
-    # a throwaway subprocess and vanish. Point the user at shell mode up front
-    # instead of silently no-op'ing (or refusing with an unrelated reason).
-    if mode != "shell" and cmd.split() and cmd.split()[0] in _STATE_BUILTINS:
+    # State-setting builtins (export/alias/unset) auto-run without --allow — they
+    # only set shell state, no external code (chain-guarded). But they only persist
+    # in shell mode; in cwd/stateless each command is a throwaway subprocess, so
+    # instead of running a no-op we say it won't persist. (source/. are NOT here —
+    # they execute a file's contents, so they need --allow; see _why_refused.)
+    prog = cmd.split()[0] if cmd.split() else ""
+    safe_builtin = prog in _SAFE_STATE_BUILTINS and not _is_chain_unsafe(cmd)
+    if safe_builtin and mode != "shell":
         return {"block": _reply(mode, trust_on, cmd,
-                f"only persists in shell mode. In `{mode}` mode each command runs in a "
-                f"fresh subprocess, so this wouldn't carry to the next one. Switch with "
-                f"`sethu --mode shell` (add `sethu --rc on` to load your aliases and "
-                f"functions).", on)}
+                f"`{prog}` sets shell state, but in `{mode}` mode each command runs in a "
+                f"fresh shell so it wouldn't persist. Keep it by switching to shell mode: "
+                f"`sethu --mode shell` (add `sethu --rc on` for your aliases/functions).",
+                on)}
 
-    allowed = trust_on or _matches(cmd, cfg["allow"]) or (
+    allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
-    if not is_cd(cmd) and not allowed:
+    if not _is_bare_cd(cmd) and not allowed:
         why = _why_refused(cmd, cfg)
         why_line = (why + "\n") if why else ""
         ro = "" if cfg.get("readonly") else \
@@ -1026,7 +1049,7 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""{ICON} sethu: run terminal commands from Claude's prompt box (no `!` needed).
+    return f"""{ICON} · sethu: run terminal commands from Claude's prompt box (no `!` needed).
 
   > cmd      run it, show the output to YOU only. Free (Claude never sees it).
   >> cmd     run it AND send the output to Claude (this costs tokens).
@@ -1073,38 +1096,36 @@ def normalize_argv(argv):
 
 
 class _Parser(argparse.ArgumentParser):
-    """argparse, but errors are branded and colored so they stand out (argparse's
+    """argparse, but errors carry the |^=^| icon and are colored so they stand out (argparse's
     default dumps a plain, monochrome usage wall that's hard to spot the error in).
     Points at the menu instead of re-printing every flag."""
     def error(self, message):
         on = _color_on(load_config())
         sys.stderr.write(
-            _c(ICON, "icon", on) + " "
+            _c(ICON, "icon", on) + " " + _c("·", "dim", on) + " "
             + _c(f"sethu: error: {message}", "fail", on) + "\n"
             + _c("Run `sethu` for the options menu.", "dim", on) + "\n")
         sys.exit(2)
 
 
 def readonly_list_text():
-    """On-demand answer to 'what does read-only mode run without --allow, and why
-    is my command not on it' — the companion to the 'not recognized' refusal. Names
-    are sorted so the output is stable (set iteration order isn't). Not a semantic
-    analyzer: it's this curated set plus the flag guards, and anything else is
-    refused with a reason + a one-line --allow."""
-    names = textwrap.fill("  ".join(sorted(READONLY)), width=74,
+    """On-demand answer to 'what does read-only run without --allow, and why is my
+    command not on it' — the companion to the 'not recognized' refusal. Names are
+    sorted so the output is stable (set iteration order isn't). Kept short: the
+    per-command refusal explains any specific write/exec-flag guard in context, so
+    this doesn't enumerate them all."""
+    # cd (navigation) and the state builtins (export/alias/unalias/unset) aren't in
+    # READONLY but also run without --allow, so list them in sorted order with the
+    # rest rather than as dangling footnotes.
+    extra = {"cd"} | _SAFE_STATE_BUILTINS
+    names = textwrap.fill("  ".join(sorted(READONLY | extra)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
-    guards = (
-        "  sort -o/--output · xxd -r · date -s/--set · find -exec/-delete/… · "
-        "git writes (push/commit/…) · git -c/--config-env/--exec-path · "
-        "git -C/--git-dir (foreign repo) · git --ext-diff/--output"
-    )
     return (
-        "read-only mode runs these commands without asking (no --allow needed):\n\n"
+        "these run without asking (no --allow needed):\n\n"
         f"{names}\n\n"
-        "…but only without their write/exec flags, which stay refused:\n"
-        f"{guards}\n\n"
-        "Anything else is refused with a reason. To run one anyway:\n"
-        '  sethu --allow "<command>"'
+        "A write or exec flag still needs --allow (e.g. `sort -o`, `git push`, "
+        "`find -exec`).\n"
+        'For anything else:  sethu --allow "<command>"'
     )
 
 
@@ -1127,7 +1148,7 @@ def main(argv=None):
     p.add_argument("--readonly", choices=["on", "off"],
                    help="auto-allow a curated set of read-only commands")
     p.add_argument("--readonly-list", action="store_true", dest="readonly_list",
-                   help="list the commands read-only mode runs without --allow")
+                   help="list the commands read-only runs without --allow")
     p.add_argument("--trust", choices=["on", "off"],
                    help="bypass the allowlist — run ANY command (footgun)")
     p.add_argument("--rc", choices=["on", "off"],

@@ -78,6 +78,18 @@ def main():
     from _engine import (process, SUBCOMMANDS, ICON,  # noqa: E402
                          _c, _color_on, load_config)
 
+    on = _color_on(load_config())
+
+    def _lead(text):
+        """The ONE guarantee that every sethu response the user sees opens with the
+        |^=^| icon + `·` separator, so it's instantly recognizable as sethu (not
+        their own shell or Claude). Skips when the text already leads with the icon
+        (a header/help/error already embeds it), so it's never doubled. Every
+        user-facing emission below routes through this."""
+        if ICON in text.split("\n", 1)[0]:
+            return text
+        return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
+
     # `sethu …` → run the management CLI locally, block the model.
     if is_sethu_command(prompt, SUBCOMMANDS):
         import shlex
@@ -87,12 +99,9 @@ def main():
             argv = shlex.split(args)
         except ValueError:
             # Unbalanced quotes: refuse rather than run with a broken argv that
-            # would persist a garbage token (e.g. `sethu allow "oops`). Branded like
-            # the argparse error path (bold icon + red message).
-            on = _color_on(load_config())
-            _block(_c(ICON, "icon", on) + " " + _c(
-                "sethu: error: mismatched quotes in that command. "
-                "Check your quoting and try again.", "fail", on))
+            # would persist a garbage token (e.g. `sethu allow "oops`).
+            _block(_lead(_c("sethu: error: mismatched quotes in that command. "
+                            "Check your quoting and try again.", "fail", on)))
         try:
             run = subprocess.run(
                 [sys.executable, ENGINE, *argv],
@@ -101,12 +110,12 @@ def main():
             text = (run.stdout or "") + (("\n" + run.stderr) if run.stderr else "")
         except Exception as e:
             text = f"sethu error: {e}"
-        _block(text.strip() or "(no output)")
+        _block(_lead(text.strip() or "(no output)"))
 
     # `>`/`>>` command runner.
     result = process(prompt, data)
     if "block" in result:
-        print(json.dumps({"decision": "block", "reason": result["block"]}))
+        print(json.dumps({"decision": "block", "reason": _lead(result["block"])}))
     elif "context" in result:
         out = {
             "hookSpecificOutput": {
@@ -118,7 +127,7 @@ def main():
         # user would otherwise see nothing. systemMessage shows the local
         # confirmation so the token cost is visible at the moment it's incurred.
         if result.get("note"):
-            out["systemMessage"] = result["note"]
+            out["systemMessage"] = _lead(result["note"])
         print(json.dumps(out))
     # passthrough -> print nothing
     sys.exit(0)

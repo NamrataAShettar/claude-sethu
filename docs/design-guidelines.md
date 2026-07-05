@@ -8,6 +8,13 @@ with one, either don't make it or update this doc deliberately.
 
 ## UX
 
+- **Every response opens with `|^=^| · `** so people instantly recognize it as sethu
+  (not their own shell or Claude). This holds for *all* output — bridged `>`/`>>`
+  results, the `>>` local note, management (`sethu --…`) output, help, the first-run
+  hint, and errors. The hook routes every user-facing emission through `_lead`, which
+  prepends the icon + `·` separator (de-duped, never doubled), and
+  `TestEveryResponseLeadsWithIcon` drives one of each kind end-to-end so a new path
+  that drops it fails CI. Add a case there when you add a response kind.
 - **One unified header for every response.** Result *and* message share
   `|^=^| · [mode] [⚠trust] · [status ·] $ cmd` (helper `_header`), every part dim-`·`
   -separated. A real run fills the status slot (`✓/✗/⚠` from the exit code); a
@@ -16,7 +23,7 @@ with one, either don't make it or update this doc deliberately.
   and reads as a continuation ("`$ git branch`" → "isn't allowed to run"). Bare `>`
   (no command) is the one exception (`_msg`).
 - **Colorblind-safe palette (Okabe-Ito), and keep it lean.** blue = success,
-  red/vermillion = failure, amber = warning, teal = brand/`[mode]` tag, orange =
+  red/vermillion = failure, amber = warning, teal = sethu icon / `[mode]` tag, orange =
   `⚠trust`. No green/red pairing. Differentiate with **weight or separators, not
   new hues** — every added color costs scannability. If tempted to add a color,
   don't.
@@ -27,7 +34,7 @@ with one, either don't make it or update this doc deliberately.
   open doesn't bleed into the rest of the transcript — that's hygiene, not
   recoloring.)
 - **Don't color routine messages.** Refusals and info (interactive, isn't-allowed,
-  cd, state-builtin) are the branded icon + `·` separator + **plain body** — they're
+  cd, state-builtin) are the `|^=^|` icon + `·` separator + **plain body** — they're
   normal outcomes, not alarms. Reserve color for *status* (✓/✗ exit) and *genuine
   problems* (e.g. the garbled-output warning is amber). Coloring every routine
   refusal would be warning fatigue.
@@ -63,6 +70,21 @@ with one, either don't make it or update this doc deliberately.
 
 ## Security
 
+- **What auto-runs is mode-INDEPENDENT; mode only decides statefulness.** This is a
+  load-bearing invariant — don't erode it:
+  - **Auto-runs without `--allow`, in every mode:** read-only commands (the `READONLY`
+    set) **plus** the set-a-variable/alias builtins (`export`/`alias`/`unalias`/`unset`),
+    all chain-guarded. None of these execute external code.
+  - **Never auto-runs, in any mode:** anything that executes code — `source`/`.` (they
+    run a file's contents = arbitrary code) and every non-read-only program → requires
+    `--allow` or `--trust`.
+  - `mode` (cwd/stateless/shell) changes only whether state *persists*, never *what is
+    permitted*. A state builtin runs-and-persists in shell mode; in cwd/stateless it's a
+    no-op, so show a concise "won't persist, use `--mode shell`" note (don't execute it,
+    don't refuse it as forbidden). Presentation differs by mode; permission does not.
+  - Do NOT make the auto-allow set mode-dependent (e.g. auto-permitting `source` only in
+    shell mode) — it's confusing and, for `source`, it would open arbitrary execution in
+    the default mode. If you're tempted to special-case a mode's permissions, don't.
 - **Read-only is decided by FLAGS, not just program names.** Every entry in the
   `READONLY` set needs an explicit exec/write-flag policy (`fd -x`, `rg --pre`,
   `yq -i`, `git --ext-diff` were misses). Auditing the whole set is part of any
@@ -113,7 +135,7 @@ with one, either don't make it or update this doc deliberately.
 ## Checklist for any change
 
 - [ ] **Tested** — a test added/adjusted; coverage-table row updated; `TestCoverageEnforcement` green; full suite passes.
-- [ ] **UX** — branded (`|^=^|`), colorblind-safe & no new hue, truthful, actionable, plain language, no em-dashes.
+- [ ] **UX** — opens with the `|^=^|` icon (so sethu is instantly recognizable), colorblind-safe & no new hue, truthful, actionable, plain language, no em-dashes.
 - [ ] **Correctness** — validates input, fails safe, doesn't rely on stale state.
 - [ ] **Security** — does it widen what runs? flags (not just names) audited? fails closed? trust still opt-in?
 - [ ] **Performance** — no new work on the every-prompt path; fast path still skips `_engine`.

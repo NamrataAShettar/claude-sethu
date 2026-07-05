@@ -25,7 +25,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
                                          TestConfig, TestTrust
   --trust on/off                         TestTrust                              [x]
   --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
-  state builtins hint at shell mode      TestStateBuiltinHint                   [x]
+  state builtins auto-run; source gated  TestStateBuiltinHint                   [x]
   --color on/off                         TestColor, TestConfig                  [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
@@ -41,7 +41,9 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
   git globals / exec-c / --ext-diff      TestReadonlyFn                         [x]
+  bare-cd guard (chain not exempt)       TestSafety, TestShellMode              [x]
   --readonly-list + honest refusal       TestManagementCLI, TestReadonlyFn      [x]
+  every response opens with |^=^| ·       TestEveryResponseLeadsWithIcon         [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
   long-output truncation + temp file     TestTruncate                           [x]
@@ -307,6 +309,19 @@ class TestSafety(Base):
         self.write(allow=["vi"])
         self.assertIn("interactive", self.proc("> vi")["block"])
 
+    def test_bare_cd_guard(self):
+        # H4: only a simple cd is allowlist-exempt; a chained/substituted cd is not.
+        for c in ["cd", "cd /tmp", "cd ..", "cd 'a dir'"]:
+            self.assertTrue(_engine._is_bare_cd(c), c)
+        for c in ["cd /tmp; rm -rf ~", "cd /tmp && rm", "cd $(evil)", "cd `evil`",
+                  "cd x | sh", "cd x > f"]:
+            self.assertFalse(_engine._is_bare_cd(c), c)
+
+    def test_chained_cd_refused_not_exempt(self):
+        # H4: a chained cd must hit the normal gate (refused), not the cd exemption.
+        self.write(readonly=True)
+        self.assertIn("isn't allowed", self.proc("> cd /tmp; rm -rf ~")["block"])
+
     def test_allowlist_no_pipe_injection(self):
         # Allowing `ls` must NOT permit `ls | rm -rf x` (the reported bug).
         self.write(allow=["ls"])
@@ -431,7 +446,8 @@ class TestManagementCLI(Base):
     def test_readonly_list_prints_set_and_guards(self):
         out = self._out(["--readonly-list"])
         for t in ["ls", "git", "jq",                       # curated names shown
-                  "--ext-diff", "git writes",              # flag guards explained
+                  "cd",                                    # always-exempt builtin shown
+                  "write or exec flag still needs --allow", # the flag-guard note
                   'sethu --allow "<command>"']:            # the escape hatch
             self.assertIn(t, out, t)
         # Sorted → stable output (set iteration order is not).
@@ -885,6 +901,21 @@ class TestShellMode(Base):
         r = self.proc("> echo recovered", sid=sid)
         self.assertIn("recovered", r["block"])
 
+    def test_chained_cd_does_not_execute_in_shell_mode(self):
+        # H4 security regression: `cd` is allowlist-exempt, but in shell mode the raw
+        # string runs in the daemon, so a chained `cd x; <cmd>` must be REFUSED, not
+        # executed. (Pre-fix this created the sentinel.)
+        import time
+        sid = "test-shell-cdchain"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", readonly=True)
+        sentinel = os.path.join(self.tmp, "H4_PWNED")
+        r = self.proc(f"> cd /tmp; touch {sentinel}", sid=sid)
+        self.assertIn("block", r)                 # refused…
+        self.assertIn("isn't allowed", r["block"])
+        time.sleep(0.3)                           # give any (buggy) execution a chance
+        self.assertFalse(os.path.exists(sentinel), "chained cd executed in shell mode!")
+
     def test_shell_disables_pager(self):
         # Regression: paged commands (git log/branch) must not hang under the PTY.
         sid = "test-shell-pager"
@@ -904,16 +935,41 @@ class TestShellMode(Base):
 
 
 class TestStateBuiltinHint(Base):
-    def test_state_builtin_in_nonshell_hints_shell_mode(self):
-        # export/source/alias/… only persist in shell mode; cwd/stateless should
-        # proactively point there instead of silently no-op'ing or refusing.
+    def test_safe_state_builtin_in_nonshell_hints_shell_mode(self):
+        # UX1/UX4: export/alias/unset auto-run without --allow, but only persist in
+        # shell mode; cwd/stateless say so (a no-op note) instead of running nothing.
         for m in ("cwd", "stateless"):
             self.write(mode=m, readonly=True, color=False)
-            for c in ["export FOO=1", "source venv/bin/activate", "alias g=git",
-                      ". env/bin/activate", "unset PATHX"]:
+            for c in ["export FOO=1", "alias g=git", "unalias g", "unset PATHX"]:
                 b = self.proc("> " + c)["block"]
                 self.assertIn("shell mode", b, f"{m}: {c}")
                 self.assertIn("--mode shell", b, f"{m}: {c}")
+
+    def test_safe_state_builtin_autoruns_in_shell_mode_without_allow(self):
+        # UX1: in shell mode they auto-run WITHOUT --allow and persist.
+        sid = "test-ux1-persist"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", readonly=True, allow=[], color=False)  # no --allow
+        self.proc("> export FOO=ux1", sid=sid)
+        self.assertIn("ux1", self.proc("> echo $FOO", sid=sid)["block"])
+
+    def test_source_needs_allow_not_shell_hint(self):
+        # UX1: source/. execute a file's contents (arbitrary code), so they are NOT
+        # auto-permitted — they need --allow, with a message that says why (in every
+        # mode, since the risk isn't mode-dependent).
+        for m in ("cwd", "shell"):
+            self.write(mode=m, readonly=True, color=False)
+            for c in ["source venv/bin/activate", ". env/bin/activate"]:
+                b = self.proc("> " + c)["block"]
+                self.assertIn("--allow", b, f"{m}: {c}")
+                self.assertIn("contents of a file", b, f"{m}: {c}")
+
+    def test_state_builtin_autopermit_is_chain_guarded(self):
+        # UX1 security: the auto-permit only applies to a simple builtin — a chained
+        # or substituted one is NOT auto-run.
+        self.write(mode="shell", readonly=True, color=False)
+        for c in ["export A=1; rm -rf x", "export A=$(rm x)", "unset X && rm y"]:
+            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
 
 
 class TestRcAliases(Base):
@@ -1262,6 +1318,56 @@ class TestHookOutput(Base):
         self.write()
         out = json.loads(self._run("sethu --runner").stdout)
         self.assertEqual(out["decision"], "block")
+
+    def test_management_response_carries_icon(self):
+        # Every sethu response opens with the |^=^| icon so it's instantly
+        # recognizable as sethu — including management output (the config dump and
+        # ✔ successes), not just bridged commands.
+        self.write(allow=[])
+        for cmd in ("sethu --runner", "sethu --allow ls"):
+            out = json.loads(self._run(cmd).stdout)
+            self.assertIn(_engine.ICON, out["reason"], cmd)
+        # …but it's not doubled up when the output already leads with the icon.
+        help_out = json.loads(self._run("sethu").stdout)["reason"]
+        self.assertEqual(help_out.count(_engine.ICON), 1, "icon doubled on help")
+
+
+class TestEveryResponseLeadsWithIcon(Base):
+    """Invariant: EVERY sethu response the user sees opens with `|^=^| · ` so it's
+    instantly recognizable as sethu (vs. their own shell or Claude). The hook routes
+    all user-facing output through `_lead`, which guarantees it; this test drives one
+    of each response type end-to-end so a new/changed path that drops the icon fails
+    CI. A new response kind → add a case here."""
+    HOOK = os.path.join(HOOKS, "sethu_hook.py")
+
+    def _user_text(self, prompt, **cfg):
+        self.write(**cfg)
+        data = {"prompt": prompt, "session_id": "iconinv", "cwd": self.tmp}
+        env = dict(os.environ, SETHU_CONFIG=self.cfg, NO_COLOR="1")
+        r = subprocess.run([sys.executable, self.HOOK], input=json.dumps(data),
+                           capture_output=True, text=True, env=env)
+        out = json.loads(r.stdout) if r.stdout.strip() else {}
+        return out.get("reason") or out.get("systemMessage") or ""
+
+    def test_all_response_types_open_with_icon_and_separator(self):
+        self.addCleanup(self._shutdown, "iconinv")
+        lead = _engine.ICON + " · "
+        cases = [
+            ("> ls", {"readonly": True}),             # a run (result header)
+            ("> rm -rf x", {"readonly": True}),       # a refusal
+            ("> cd /tmp", {"mode": "cwd"}),           # cd
+            ("> vim", {"allow": ["vim"]}),            # interactive refusal
+            (">> echo hi", {"allow": ["echo"]}),      # >> local note (systemMessage)
+            ("sethu --runner", {}),                   # management: config dump
+            ("sethu --allow ls", {}),                 # management: success line
+            ("sethu --definitelynotaflag", {}),       # argparse error
+            ("sethu", {}),                            # help menu
+            ('sethu allow "oops', {}),                # mismatched quotes
+        ]
+        for prompt, cfg in cases:
+            txt = self._user_text(prompt, **cfg)
+            self.assertTrue(txt.startswith(lead),
+                            f"{prompt!r} response didn't open with the icon+separator: {txt[:50]!r}")
 
 
 class TestPython3Shim(unittest.TestCase):
