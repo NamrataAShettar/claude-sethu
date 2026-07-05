@@ -356,6 +356,16 @@ def is_cd(cmd):
     return cmd == "cd" or cmd.startswith("cd ")
 
 
+def _is_bare_cd(cmd):
+    """A *simple* `cd` — the only form that's exempt from the allowlist. `cd` is
+    exempt because it 'runs nothing', but `is_cd` only checks the `cd ` prefix, and
+    in shell mode the raw string runs in the daemon — so `cd /tmp; rm -rf ~` would
+    execute the chain. Gate the exemption on the same chain guard the allowlist
+    uses: a chained/substituted `cd` is NOT bare and falls through to the normal
+    gate (which refuses it)."""
+    return is_cd(cmd) and not _is_chain_unsafe(cmd)
+
+
 # ── per-session working directory (cwd mode) ──────────────────────────────────
 def _cwd_file(sid):
     safe = "".join(c for c in (sid or "default") if c.isalnum() or c in "-_")
@@ -913,7 +923,9 @@ def process(prompt, data):
                 status or "couldn't open a terminal, run it in your own terminal.", on)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
-    if is_cd(cmd) and mode != "shell":
+    # Only a *bare* cd is exempt — a chained `cd x; …` is not, so it can't smuggle
+    # execution past the gate (see _is_bare_cd).
+    if _is_bare_cd(cmd) and mode != "shell":
         if mode == "cwd":
             target = resolve_cd(cmd[2:], base)
             if os.path.isdir(target):
@@ -947,7 +959,7 @@ def process(prompt, data):
     allowed = trust_on or _matches(cmd, cfg["allow"]) or (
         cfg.get("readonly") and is_readonly_safe(cmd)
     )
-    if not is_cd(cmd) and not allowed:
+    if not _is_bare_cd(cmd) and not allowed:
         why = _why_refused(cmd, cfg)
         why_line = (why + "\n") if why else ""
         ro = "" if cfg.get("readonly") else \

@@ -41,6 +41,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
   git globals / exec-c / --ext-diff      TestReadonlyFn                         [x]
+  bare-cd guard (chain not exempt)       TestSafety, TestShellMode              [x]
   --readonly-list + honest refusal       TestManagementCLI, TestReadonlyFn      [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
@@ -306,6 +307,19 @@ class TestSafety(Base):
     def test_interactive_allowlisted_is_refused(self):
         self.write(allow=["vi"])
         self.assertIn("interactive", self.proc("> vi")["block"])
+
+    def test_bare_cd_guard(self):
+        # H4: only a simple cd is allowlist-exempt; a chained/substituted cd is not.
+        for c in ["cd", "cd /tmp", "cd ..", "cd 'a dir'"]:
+            self.assertTrue(_engine._is_bare_cd(c), c)
+        for c in ["cd /tmp; rm -rf ~", "cd /tmp && rm", "cd $(evil)", "cd `evil`",
+                  "cd x | sh", "cd x > f"]:
+            self.assertFalse(_engine._is_bare_cd(c), c)
+
+    def test_chained_cd_refused_not_exempt(self):
+        # H4: a chained cd must hit the normal gate (refused), not the cd exemption.
+        self.write(readonly=True)
+        self.assertIn("isn't allowed", self.proc("> cd /tmp; rm -rf ~")["block"])
 
     def test_allowlist_no_pipe_injection(self):
         # Allowing `ls` must NOT permit `ls | rm -rf x` (the reported bug).
@@ -884,6 +898,21 @@ class TestShellMode(Base):
         self.assertTrue(os.path.exists(sock))
         r = self.proc("> echo recovered", sid=sid)
         self.assertIn("recovered", r["block"])
+
+    def test_chained_cd_does_not_execute_in_shell_mode(self):
+        # H4 security regression: `cd` is allowlist-exempt, but in shell mode the raw
+        # string runs in the daemon, so a chained `cd x; <cmd>` must be REFUSED, not
+        # executed. (Pre-fix this created the sentinel.)
+        import time
+        sid = "test-shell-cdchain"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", readonly=True)
+        sentinel = os.path.join(self.tmp, "H4_PWNED")
+        r = self.proc(f"> cd /tmp; touch {sentinel}", sid=sid)
+        self.assertIn("block", r)                 # refused…
+        self.assertIn("isn't allowed", r["block"])
+        time.sleep(0.3)                           # give any (buggy) execution a chance
+        self.assertFalse(os.path.exists(sentinel), "chained cd executed in shell mode!")
 
     def test_shell_disables_pager(self):
         # Regression: paged commands (git log/branch) must not hang under the PTY.
