@@ -22,17 +22,21 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
     no flag logic), `_DANGER`, `_LAUNCHERS`, `_why_refused`, `gated_list_text`);
     interactive/TUI detection (`is_interactive`, `_REPL`,
     `_REPL_BATCH_FLAGS`, `INTERACTIVE`, `_looks_full_screen`); `run_capture` (the
-    captured runner); truncation + temp hygiene (`_truncate`, `_out_path`,
-    `_sweep_temp`, `_output_path`); `launch_in_terminal` + `_launch_command_script`.
-  - *persistent shell (shell mode)* — `shell_run`, `_sock_path`, `_spawn_daemon`,
-    `kill_daemons`, `_timeout_msg` (talks to `_shelld.py`).
+    captured runner — streams via Popen, byte-capped at `MAX_CAPTURE_BYTES`, kills a
+    runaway); truncation + temp hygiene (`_truncate`, `_out_path`, `_sweep_temp`,
+    `_output_path`); `launch_in_terminal` + `_launch_command_script`.
+  - *persistent shell (shell mode)* — `shell_run`, `_sock_path`, `_spawn_daemon`
+    (+ `_acquire_spawn_lock`/`_release_spawn_lock`, the L7 spawn guard), `kill_daemons`,
+    `_timeout_msg` (talks to `_shelld.py`).
   - *the core: process one submitted prompt* — `process()` (the one entry that returns
     `{passthrough|block|context}`), plus the header/color helpers `_header`, `_reply`,
     `_msg`, `_c`, `_ANSI`, `ICON`.
   - *management CLI* — `main`, `normalize_argv` (subcommand→flag aliasing), `_Parser`
     (branded errors), `help_text`, `_print_config`.
 - **`hooks/_shelld.py`** — the persistent-shell daemon (PTY + unix-socket server) that
-  backs shell mode; wire protocol version `_PROTO`.
+  backs shell mode; wire protocol version `_PROTO`. On a command timeout it verifies the
+  shell recovered (`_probe`/`_recover`: Ctrl-C → SIGKILL the foreground pgrp → respawn on
+  a wedge, H3) and byte-caps output (`MAX_OUTPUT`, ST7).
 - **`hooks/session_start.py`** — SessionStart hook (first-run welcome).
 - **`hooks/run.sh`** — POSIX-sh launcher: exec `python3`, or degrade gracefully when it's
   missing (the tolerant no-python3 block shim).
