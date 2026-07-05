@@ -37,6 +37,11 @@ try:
 except ValueError:
     CMD_TIMEOUT = 20
 
+# Byte ceiling on one command's captured output — mirrors _engine.MAX_CAPTURE_BYTES.
+# A runaway (`yes`, `cat big.iso`) is stopped at the cap so it can't balloon the
+# daemon's (or the client's) RAM.
+MAX_OUTPUT = 8 * 1024 * 1024   # 8 MiB
+
 
 def _perms_ok(mode):
     """True only if the socket's file mode grants no group/world access."""
@@ -130,7 +135,7 @@ def _run(master, cmd):
     os.write(master, ("printf '\\n%s %%s\\n' \"$?\"\n" % marker).encode("utf-8"))
     buf = ""
     end = time.time() + CMD_TIMEOUT
-    done = False
+    done = capped = False
     while time.time() < end:
         # Short poll interval: select() returns immediately when output is ready,
         # so this only bounds the worst-case slack when a command finishes right
@@ -147,6 +152,15 @@ def _run(master, cmd):
             if marker in buf:
                 done = True
                 break
+            if len(buf) > MAX_OUTPUT:
+                capped = True   # runaway output — stop it, don't balloon RAM (ST7)
+                break
+    if capped:
+        # Interrupt the runaway (like a timeout) so it stops flooding the PTY, then
+        # return the capped partial. recovered=False → the daemon respawns.
+        partial = buf.split(marker, 1)[0][:MAX_OUTPUT].strip()
+        recovered = _recover(master)
+        return "CAPPED\n" + partial, recovered
     if not done:
         # The command outran the timeout and is still executing (waiting on input,
         # long-running, or ignoring Ctrl-C). Interrupt AND verify recovery before

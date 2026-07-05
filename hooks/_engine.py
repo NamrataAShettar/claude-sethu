@@ -25,7 +25,9 @@ import hashlib
 import json
 import os
 import re
+import select
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -41,6 +43,11 @@ import time
 # daemon inherits it too — _shelld.py mirrors this, keep the two in sync).
 CMD_TIMEOUT = 20
 MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
+# Hard byte ceiling on a single command's captured output — bounds RAM AND the
+# on-disk log (which only stores what we captured). A runaway (`yes`, `cat big.iso`,
+# `find /`) is killed at the cap and marked truncated, so it can't OOM or fill disk.
+# `maxLines` only caps the DISPLAY; this is the safety bound. _shelld.py mirrors it.
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024   # 8 MiB
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
             "trust": False, "rc": False, "color": True,
@@ -559,24 +566,73 @@ def _timeout_msg(secs, cmd):
 
 
 def run_capture(cmd, cwd=None, timeout=None):
-    """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error."""
+    """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error.
+    Streams output with a byte cap (MAX_CAPTURE_BYTES): a runaway that produces
+    more (`yes`, `cat big.iso`, `find /`) is KILLED at the cap and marked
+    truncated, so it can't balloon RAM or the on-disk log. stdin=DEVNULL so a
+    program waiting on input gets EOF instead of hanging; timeout kept under the
+    UserPromptSubmit hook budget."""
     # GIT_PAGER/PAGER=cat so paged commands (git log, etc.) never block on a pager.
     env = dict(os.environ, NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
+    t = timeout or cmd_timeout()
     try:
-        # stdin=DEVNULL so a program waiting on input gets EOF instead of
-        # hanging; timeout kept under the UserPromptSubmit hook budget.
-        t = timeout or cmd_timeout()
-        r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=t,
-            env=env, stdin=subprocess.DEVNULL,
+        # start_new_session so a runaway and its children can be killed as a group.
+        p = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, env=env, start_new_session=True,
             cwd=cwd if (cwd and os.path.isdir(cwd)) else None,
         )
-        out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
-        return (out.strip() or "(no output)", r.returncode)
-    except subprocess.TimeoutExpired:
-        return (_timeout_msg(t, cmd), None)
     except Exception as e:
         return (f"error: {e}", None)
+    buf = bytearray()
+    truncated = timed_out = False
+    fd = p.stdout.fileno()
+    deadline = time.time() + t
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            timed_out = True
+            break
+        r, _, _ = select.select([fd], [], [], min(remaining, 0.1))
+        if r:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break                       # EOF — the command finished
+            buf.extend(chunk)
+            if len(buf) > MAX_CAPTURE_BYTES:
+                truncated = True            # STRICTLY over the cap → more is coming;
+                break                       # stop and kill it (exactly-cap-then-EOF
+                                            # is a clean finish, not a runaway)
+        elif p.poll() is not None:
+            break                           # exited, nothing left to read
+    if timed_out or truncated:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    try:
+        p.stdout.close()
+    except Exception:
+        pass
+    try:
+        code = p.wait(timeout=2)
+    except Exception:
+        code = None
+    if timed_out:
+        return (_timeout_msg(t, cmd), None)
+    if truncated:
+        del buf[MAX_CAPTURE_BYTES:]         # drop the read-ahead past the cap
+    out = buf.decode("utf-8", "replace")
+    if truncated:
+        # Lead with the note so it survives the maxLines display truncation (an 8 MB
+        # runaway is always truncated, which would bury a trailing note).
+        mb = MAX_CAPTURE_BYTES // (1024 * 1024)
+        note = f"[output capped at {mb} MB — the command produced more and was stopped]"
+        return ((note + "\n" + out).strip(), None)
+    return (out.strip() or "(no output)", code)
 
 
 def _run_quiet(argv):
@@ -759,14 +815,21 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
             if not chunk:
                 break
             data += chunk
-        # daemon replies "<exit_code>\n<output>", or "TIMEOUT\n<partial output>"
-        # when the command outran CMD_TIMEOUT (the daemon interrupts it so the
-        # shell recovers).
+            if len(data) > MAX_CAPTURE_BYTES + 4096:
+                break   # defensive: the daemon already caps, but never balloon here
+        # daemon replies "<exit_code>\n<output>", "TIMEOUT\n<partial>" (outran the
+        # timeout), or "CAPPED\n<partial>" (output hit the byte cap); in the last two
+        # the daemon interrupts the command so the shell recovers.
         text = data.decode("utf-8", "replace")
         first, _, rest = text.partition("\n")
         if first.strip() == "TIMEOUT":
             partial = (rest.strip() + "\n") if rest.strip() else ""
             return (partial + _timeout_msg(timeout or cmd_timeout(), cmd), None)
+        if first.strip() == "CAPPED":
+            mb = MAX_CAPTURE_BYTES // (1024 * 1024)
+            note = f"[output capped at {mb} MB — the command produced more and was stopped]"
+            body = rest.strip()
+            return ((note + "\n" + body if body else note), None)
         if first.strip().lstrip("-").isdigit():
             return (rest.strip() or "(no output)", int(first))
         # No exit-code line (e.g. an older daemon) — show the whole reply rather

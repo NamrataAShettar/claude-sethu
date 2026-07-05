@@ -50,6 +50,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   socket path + 0600 perms               TestSocketPath, TestSocketPerms        [x]
   kill / reap shell daemons              TestKillDaemons                        [x]
   timeout recovery (no wedge/bleed) H3   TestShellMode                          [x]
+  output byte-cap (RAM/disk) ST1/ST7     TestOutputCap / TestShellMode          [x]
   first-run welcome hint                 TestFirstRunHint                       [x]
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
@@ -933,6 +934,51 @@ class TestShellMode(Base):
         r = self.proc("> echo runs_ok", sid=sid)
         self.assertIn("runs_ok", r["block"])
         self.assertNotIn("path too long", r["block"])
+
+    def test_shell_mode_caps_runaway_output(self):
+        # ST1/ST7: a runaway (`yes`) in shell mode is stopped at the byte cap and
+        # the shell recovers (next command works), with the cap note surfaced.
+        sid = "test-shell-cap"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", trust=True, maxLines=5, color=False)
+        r = self.proc("> yes", sid=sid)["block"]
+        self.assertIn("capped at", r)
+        self.assertIn("RECOVER_OK", self.proc("> echo RECOVER_OK", sid=sid)["block"])
+
+
+class TestOutputCap(Base):
+    """ST1: captured output is byte-capped in RAM and on disk (maxLines only caps
+    the DISPLAY). A runaway is killed at the cap, not buffered unbounded."""
+
+    def test_run_capture_kills_runaway_at_cap(self):
+        out, code = _engine.run_capture("yes")   # infinite output
+        self.assertLessEqual(len(out.encode("utf-8", "replace")),
+                             _engine.MAX_CAPTURE_BYTES + 4096)
+        self.assertIn("capped at", out)
+        self.assertIsNone(code)                  # killed, no clean exit
+
+    def test_run_capture_normal_command_unaffected(self):
+        out, code = _engine.run_capture("printf 'a\\nb\\nc\\n'")
+        self.assertEqual(code, 0)
+        self.assertNotIn("capped", out)
+        self.assertEqual(out.strip(), "a\nb\nc")
+
+    def test_run_capture_stderr_captured(self):
+        out, _ = _engine.run_capture("ls /nonexistent-sethu-xyz")
+        self.assertIn("nonexistent-sethu-xyz", out)   # stderr merged into output
+
+    def test_exact_cap_boundary_is_clean_finish(self):
+        # LOW-1: a command emitting EXACTLY the cap then EOF is not a runaway —
+        # it must keep its exit code and NOT be flagged truncated.
+        n = _engine.MAX_CAPTURE_BYTES
+        out, code = _engine.run_capture(f"head -c {n} /dev/zero")
+        self.assertEqual(code, 0)
+        self.assertNotIn("capped", out)
+
+    def test_cap_note_survives_display_truncation(self):
+        # The note leads the output, so maxLines truncation can't bury it (cwd mode).
+        self.write(trust=True, maxLines=3, color=False)
+        self.assertIn("capped at", self.proc("> yes")["block"])
 
 
 class TestStateBuiltinHint(Base):
