@@ -49,6 +49,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   temp-file sweep                        TestSweep                              [x]
   socket path + 0600 perms               TestSocketPath, TestSocketPerms        [x]
   kill / reap shell daemons              TestKillDaemons                        [x]
+  timeout recovery (no wedge/bleed) H3   TestShellMode                          [x]
   first-run welcome hint                 TestFirstRunHint                       [x]
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
@@ -900,6 +901,29 @@ class TestShellMode(Base):
         self.write(mode="shell", allow=["echo"])
         r = self.proc("> echo PG=$GIT_PAGER", sid=sid)
         self.assertIn("PG=cat", r["block"])
+
+    def test_timeout_recovers_from_sigint_surviving_job(self):
+        # H3: a job that ignores Ctrl-C (`trap '' INT`) times out, but the shell
+        # must NOT stay wedged — the very next command has to run normally (the
+        # daemon escalates to SIGKILL / respawns).
+        sid = "test-shell-h3-wedge"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", trust=True, timeout=2, color=False)
+        self.proc("> trap '' INT; sleep 30", sid=sid)          # times out (~2s)
+        r = self.proc("> echo RECOVERED_OK", sid=sid)["block"]  # must work
+        self.assertIn("RECOVERED_OK", r)
+        self.assertNotIn("timed out", r)
+
+    def test_timeout_no_output_bleed_or_late_exec(self):
+        # H3: a timed-out command's late output must not bleed into the next
+        # command, and a fresh command must be clean.
+        sid = "test-shell-h3-bleed"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", trust=True, timeout=2, color=False)
+        self.proc("> trap '' INT; sleep 3; echo LEAKED_LATE", sid=sid)  # times out
+        r = self.proc("> echo FRESH_QQQ", sid=sid)["block"]
+        self.assertIn("FRESH_QQQ", r)
+        self.assertNotIn("LEAKED_LATE", r)
 
     def test_real_uuid_session_id(self):
         # Regression: a full-length UUID must not overflow the AF_UNIX path.
