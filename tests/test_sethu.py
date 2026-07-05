@@ -265,6 +265,33 @@ class TestInteractiveFn(unittest.TestCase):
         for c in ["python -q", "python -u", "python -O", "python -v"]:
             self.assertTrue(_engine.is_interactive(c), c)
 
+    def test_more_repls_bare_is_interactive(self):
+        # We support more than python/node: any dual-mode interpreter's BARE form
+        # is a REPL (refuse, point at --launch).
+        for c in ["deno", "php -a", "lua", "R", "julia", "clj", "tclsh",
+                  "redis-cli", "mongosh", "pypy", "scala"]:
+            self.assertTrue(_engine.is_interactive(c), c)
+
+    def test_more_repls_with_script_or_command_is_batch(self):
+        # …but running something with them (a script / -e code / a subcommand) is
+        # batch and must still be captured, not refused.
+        for c in ["deno run app.ts", "php index.php", "lua build.lua",
+                  "Rscript analyze.R", "julia run.jl", 'redis-cli GET mykey',
+                  'mongosh --eval "db.x.find()"', "R --version",
+                  "php -v", "lua -v", "julia -v"]:   # -v = version (batch) off python
+            self.assertFalse(_engine.is_interactive(c), c)
+
+    def test_python_dash_v_stays_interactive_not_version(self):
+        # The outlier: python -v is VERBOSE, not version, so it still opens a REPL.
+        self.assertTrue(_engine.is_interactive("python -v"))
+        self.assertTrue(_engine.is_interactive("python3 -v"))
+
+    def test_always_interactive_repls_and_debuggers(self):
+        # REPLs/debuggers with no useful captured form are unconditionally
+        # interactive (the batch tool is a different command).
+        for c in ["ghci", "iex", "erl", "gdb ./a.out", "lldb ./a.out"]:
+            self.assertTrue(_engine.is_interactive(c), c)
+
 
 class TestSafety(Base):
     def test_not_allowed_refused(self):

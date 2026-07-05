@@ -398,6 +398,9 @@ INTERACTIVE = {
     "vi", "vim", "nvim", "nano", "emacs", "pico", "less", "more", "most", "man",
     "top", "htop", "btop", "ssh", "telnet", "tmux", "screen", "watch", "fg",
     "psql", "mysql", "sqlite3",
+    # language REPLs / debuggers that are (almost) always driven interactively;
+    # the batch form uses a different tool (runghc/elixir/erlc) or is niche.
+    "ghci", "iex", "erl", "gdb", "lldb",
     # full-screen TUIs a dev is likely to type
     "claude", "aider", "lazygit", "gitui", "tig", "k9s", "ncdu", "ranger", "nnn",
     "fzf", "mc", "vifm",
@@ -409,15 +412,31 @@ INTERACTIVE = {
 # With a script, `-c CODE`, or `-m MODULE` they run to completion and return, so
 # they're fine for the captured runner. `python script.py` is batch; `python` is
 # a REPL. `-i` forces the prompt open, so it stays interactive.
-_REPL = {"python", "python3", "node", "irb", "ipython"}
+# Dual-mode interpreters/clients: used BOTH as an interactive REPL (bare, or with
+# -i) AND to run-and-exit (a script path, -e/-c code, or a subcommand). We inspect
+# the args to tell which — bare / flag-only → REPL (refuse, point at --launch); any
+# non-flag arg or a run-and-exit flag → batch (capture it). python and node get the
+# extra flag rules below; every other entry rides the generic non-flag-arg rule
+# (which is why adding one here only affects its BARE form — `X script` already runs
+# regardless of membership). Always-interactive programs go in INTERACTIVE instead.
+_REPL = {
+    "python", "python3", "python2", "pypy", "ipython",   # python family
+    "node", "deno",                                       # JS/TS
+    "irb",                                                # ruby REPL
+    "php", "lua", "luajit", "R", "julia",                # other languages
+    "scala", "clojure", "clj", "tclsh",
+    "redis-cli", "mongosh",                               # DB clients: bare = REPL, `cmd` = batch
+}
 # REPL flags that make the interpreter run-and-exit instead of dropping into a
 # prompt — so the command is batch (safe to capture), not interactive. -c/-m take
 # code to run; the version/help flags print and exit. Prompt-preserving flags
 # (-q/-u/-O/-b, python's verbose -v) are deliberately absent: with no script they
-# still open a REPL. node's -v/-e/-p are batch there but clash with python's
-# meanings, so they're kept node-only.
+# still open a REPL.
 _REPL_BATCH_FLAGS = {"-c", "-m", "-V", "--version", "-h", "--help"}
 _REPL_BATCH_FLAGS_NODE = {"-v", "-e", "--eval", "-p", "--print"}
+# The python family is the outlier where `-v` means VERBOSE (still a REPL); for
+# every other interpreter `-v` prints the version and exits (batch).
+_PYTHON_REPL = {"python", "python3", "python2", "pypy", "ipython"}
 
 # Shell builtins that set state (env vars, aliases). They only persist in shell
 # mode; in cwd/stateless each command is a throwaway subprocess, so running one is
@@ -446,6 +465,8 @@ def is_interactive(cmd):
         batch = _REPL_BATCH_FLAGS
         if prog == "node":
             batch = _REPL_BATCH_FLAGS | _REPL_BATCH_FLAGS_NODE
+        elif prog not in _PYTHON_REPL:
+            batch = _REPL_BATCH_FLAGS | {"-v"}  # -v = version (exits) everywhere but python
         # A run-and-exit flag (-c/-m/--version/--help), or any non-flag arg (a
         # script path / -c's code), means it runs and exits → batch, not a REPL.
         for a in args:
@@ -1065,11 +1086,11 @@ class _Parser(argparse.ArgumentParser):
 
 
 def readonly_list_text():
-    """On-demand, human-readable answer to 'what does read-only mode run without
-    --allow, and why is my command not on it' — the companion to the 'not
-    recognized' refusal. Names are sorted so the output is stable (set iteration
-    order isn't). Not a semantic analyzer: it's this curated set plus the flag
-    guards, and anything else is refused with a reason + a one-line --allow."""
+    """On-demand answer to 'what does read-only mode run without --allow, and why
+    is my command not on it' — the companion to the 'not recognized' refusal. Names
+    are sorted so the output is stable (set iteration order isn't). Not a semantic
+    analyzer: it's this curated set plus the flag guards, and anything else is
+    refused with a reason + a one-line --allow."""
     names = textwrap.fill("  ".join(sorted(READONLY)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
     guards = (
