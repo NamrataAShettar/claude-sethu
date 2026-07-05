@@ -42,6 +42,11 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
   `TestCoverageEnforcement` (top of file). **`docs/`** — design-guidelines, testing,
   use-cases.
 
+**Keep this map (and this file) current.** When a change adds, renames, moves, or
+removes a module, a top-level function, or an `_engine.py` section — or changes a
+workflow/gotcha noted below — update `CLAUDE.md` in the SAME change so it never drifts
+from the code. A stale map is worse than none.
+
 ## Before any change
 - **Run it against the checklist in [`docs/design-guidelines.md`](docs/design-guidelines.md)**
   (UX / correctness / security / performance / storage). That doc is the single
@@ -55,6 +60,8 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
 - Keep the suite green (`python3 -m unittest discover -s tests`) and
   `claude plugin validate .` passing. Every feature/arg needs a test + a coverage
   row (`TestCoverageEnforcement` enforces it).
+- **Update this file in the same change** when you move code (see the Code map note) or
+  change a workflow/gotcha/release step documented here — don't let `CLAUDE.md` drift.
 
 ## Gotchas & context
 - **Token model (the point):** `> cmd` → `decision:block` → the model never sees it →
