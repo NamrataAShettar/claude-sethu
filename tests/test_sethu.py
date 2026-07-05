@@ -18,6 +18,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
                                          TestRefusalMessages
   --unallow                              TestConfig                             [x]
   --launch / --unlaunch                  TestLaunch, TestConfig                 [x]
+  truthful add/remove + empty/multispace TestManagementCLI                     [x]
   --mode stateless/cwd/shell             TestModeSwitching, TestCwdMode,        [x]
                                          TestShellMode
   --readonly on/off                      TestReadonlyFn, TestSafety,            [x]
@@ -35,10 +36,12 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   bare `sethu` (help menu)               TestManagementCLI                      [x]
   branded/colored CLI errors             TestManagementCLI                      [x]
   subcommand aliases (mode shell = …)    TestNormalizeArgv                      [x]
-  interactive guard (vim / bare REPL)    TestInteractiveFn, TestSafety,         [x]
+  interactive guard (REPL/version/help)  TestInteractiveFn, TestSafety,         [x]
                                          TestRefusalMessages
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
   readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
+  git globals / exec-c / --ext-diff      TestReadonlyFn                         [x]
+  --readonly-list + honest refusal       TestManagementCLI, TestReadonlyFn      [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
   long-output truncation + temp file     TestTruncate                           [x]
@@ -135,6 +138,57 @@ class TestReadonlyFn(unittest.TestCase):
                   "git diff", "git show HEAD", "find . -follow", "find . -name x"]:
             self.assertTrue(_engine.is_readonly_safe(c), c)
 
+    def test_git_global_options_readonly(self):
+        # M2: a read-only git subcommand stays read-only behind leading NON-
+        # retargeting globals (output/pathspec handling only).
+        for c in ["git --no-pager log", "git -p diff", "git --paginate show HEAD",
+                  "git --literal-pathspecs ls-files",
+                  "git --no-optional-locks --no-pager status"]:
+            self.assertTrue(_engine.is_readonly_safe(c), c)
+
+    def test_git_global_options_still_refuse_writes(self):
+        # M2: globals must not smuggle a write subcommand past the gate…
+        for c in ["git --no-pager reset --hard", "git -p push"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_git_exec_globals_refused(self):
+        # M2/security: options that run code from config — retargeting (-C,
+        # --git-dir: a foreign repo's config execs on status/diff) or exec-capable
+        # (-c/--config-env/--exec-path) — are never auto-read-only, even in front
+        # of a read-only subcommand.
+        for c in ["git -c core.pager=evil log", "git -c alias.x='!sh' status",
+                  "git --exec-path=/evil status", "git --config-env=core.pager=X log",
+                  "git -C /tmp status", "git --git-dir=/r/.git log",
+                  "git --work-tree=/r status", "git -C hostile diff"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_git_ext_diff_refused(self):
+        # L1 (shipped with M2): --ext-diff runs the configured external diff program.
+        for c in ["git log --ext-diff", "git show --ext-diff HEAD",
+                  "git -C /tmp diff --ext-diff"]:
+            self.assertFalse(_engine.is_readonly_safe(c), c)
+
+    def test_why_refused_git_globals(self):
+        # M2: refusal reasons stay accurate through leading globals.
+        cfg = {"readonly": True}
+        self.assertIn("push", _engine._why_refused("git --no-pager push", cfg))
+        # exec-capable and repo-retargeting globals share the "config can run
+        # programs" explanation.
+        for c in ("git -c core.pager=x log", "git -C /tmp status"):
+            self.assertIn("config can run", _engine._why_refused(c, cfg), c)
+        self.assertIn("--ext-diff",
+                      _engine._why_refused("git log --ext-diff", cfg))
+
+    def test_why_refused_unknown_is_honest(self):
+        # An unrecognized command is genuinely read-only but not in our set — the
+        # refusal must say "doesn't recognize", not the false "isn't a read-only
+        # command", and point to the list.
+        msg = _engine._why_refused("bat file.txt", {"readonly": True})
+        self.assertIn("doesn't recognize", msg)
+        self.assertIn("bat", msg)
+        self.assertIn("--readonly-list", msg)
+        self.assertNotIn("isn't a read-only command", msg)
+
 
 class TestHookGate(Base):
     """The cheap prefix/`sethu` gate in sethu_hook that decides, without importing
@@ -197,6 +251,46 @@ class TestInteractiveFn(unittest.TestCase):
                   "node app.js", 'node -e "console.log(1)"',
                   "python -u worker.py"]:
             self.assertFalse(_engine.is_interactive(c), c)
+
+    def test_version_help_flags_are_batch(self):
+        # M3: version/help flags print and exit — batch, not an interactive REPL,
+        # so they must run captured (not get the wrong --launch hint).
+        for c in ["python --version", "python -V", "python3 --help", "python -h",
+                  "node --version", "node -v", "node -p 1", "node --eval x"]:
+            self.assertFalse(_engine.is_interactive(c), c)
+
+    def test_prompt_preserving_flags_still_interactive(self):
+        # …but a bare interpreter with only prompt-preserving flags still opens a
+        # REPL (python -v is verbose, NOT version), so it stays interactive.
+        for c in ["python -q", "python -u", "python -O", "python -v"]:
+            self.assertTrue(_engine.is_interactive(c), c)
+
+    def test_more_repls_bare_is_interactive(self):
+        # We support more than python/node: any dual-mode interpreter's BARE form
+        # is a REPL (refuse, point at --launch).
+        for c in ["deno", "php -a", "lua", "R", "julia", "clj", "tclsh",
+                  "redis-cli", "mongosh", "pypy", "scala"]:
+            self.assertTrue(_engine.is_interactive(c), c)
+
+    def test_more_repls_with_script_or_command_is_batch(self):
+        # …but running something with them (a script / -e code / a subcommand) is
+        # batch and must still be captured, not refused.
+        for c in ["deno run app.ts", "php index.php", "lua build.lua",
+                  "Rscript analyze.R", "julia run.jl", 'redis-cli GET mykey',
+                  'mongosh --eval "db.x.find()"', "R --version",
+                  "php -v", "lua -v", "julia -v"]:   # -v = version (batch) off python
+            self.assertFalse(_engine.is_interactive(c), c)
+
+    def test_python_dash_v_stays_interactive_not_version(self):
+        # The outlier: python -v is VERBOSE, not version, so it still opens a REPL.
+        self.assertTrue(_engine.is_interactive("python -v"))
+        self.assertTrue(_engine.is_interactive("python3 -v"))
+
+    def test_always_interactive_repls_and_debuggers(self):
+        # REPLs/debuggers with no useful captured form are unconditionally
+        # interactive (the batch tool is a different command).
+        for c in ["ghci", "iex", "erl", "gdb ./a.out", "lldb ./a.out"]:
+            self.assertTrue(_engine.is_interactive(c), c)
 
 
 class TestSafety(Base):
@@ -288,6 +382,61 @@ class TestManagementCLI(Base):
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))
 
+    def test_allow_truthful_add_vs_duplicate(self):
+        # M4/UX8: ✔ added only when it actually changed; a duplicate says so.
+        self.write(allow=[])
+        self.assertIn("✔ added to allow", self._out(["--allow", "npm test"]))
+        out = self._out(["--allow", "npm test"])           # second time
+        self.assertIn("already allowed", out)
+        self.assertNotIn("✔ added", out)
+
+    def test_unallow_truthful_present_vs_absent(self):
+        # M4: ✔ removed only when the entry existed; otherwise "not in the list".
+        self.write(allow=["npm test"])
+        self.assertIn("✔ removed", self._out(["--unallow", "npm test"]))
+        out = self._out(["--unallow", "neverexisted"])
+        self.assertIn("not in the allowlist", out)
+        self.assertNotIn("✔ removed", out)
+
+    def test_unlaunch_absent_is_truthful(self):
+        self.write(launch=[])
+        self.assertIn("not in the launch list", self._out(["--unlaunch", "nope"]))
+
+    def test_multispace_entry_is_removable(self):
+        # M4: a multi-space allow must be removable via the (space-collapsing)
+        # subcommand style — both canonicalize to one entry.
+        self.write(allow=[])
+        self._out(["--allow", "a   b"])                     # stored canonical
+        cfg = _engine.load_config()
+        self.assertEqual(cfg["allow"], ["a b"])
+        self.assertIn("✔ removed", self._out(["--unallow", "a b"]))
+        self.assertEqual(_engine.load_config()["allow"], [])
+
+    def test_legacy_multispace_entry_canonicalized_on_load(self):
+        # LOW-2: an entry stored raw (older version / hand-edit) with multiple
+        # spaces is canonicalized when loaded, so it's removable AND can match.
+        self.write(allow=["a   b"])
+        self.assertEqual(_engine.load_config()["allow"], ["a b"])
+        self.assertIn("✔ removed", self._out(["--unallow", "a b"]))
+        self.assertEqual(_engine.load_config()["allow"], [])
+
+    def test_empty_arg_says_nothing_not_config_dump(self):
+        # UX10: `--allow ""` must say so, not silently dump the whole config.
+        self.write(allow=[])
+        for flag in ("--allow", "--unallow", "--launch", "--unlaunch"):
+            out = self._out([flag, ""])
+            self.assertIn("nothing to", out, flag)
+            self.assertNotIn("sethu config", out, flag)  # not the --runner view
+
+    def test_readonly_list_prints_set_and_guards(self):
+        out = self._out(["--readonly-list"])
+        for t in ["ls", "git", "jq",                       # curated names shown
+                  "--ext-diff", "git writes",              # flag guards explained
+                  'sethu --allow "<command>"']:            # the escape hatch
+            self.assertIn(t, out, t)
+        # Sorted → stable output (set iteration order is not).
+        self.assertEqual(out, self._out(["--readonly-list"]))
+
     def test_bad_arg_error_is_branded(self):
         # A bad flag gives a branded, concise error (icon + 'error:' + menu
         # pointer), not argparse's plain usage wall.
@@ -371,7 +520,7 @@ class TestRefusalMessages(Base):
         cases = {
             "git branch": "change the repo",
             "sort -o out f": "writes a file",
-            "npm test": "isn't a read-only command",
+            "npm test": "doesn't recognize `npm`",
             "ls; rm -rf ~": "joined by",
         }
         for cmd, why in cases.items():
@@ -476,6 +625,16 @@ class TestRunner(Base):
         r = self.proc(">> echo to-claude")
         self.assertIn("context", r)
         self.assertIn("to-claude", r["context"])
+
+    def test_pipe_gives_local_confirmation(self):
+        # UX2: `>>` costs tokens, so it must show a local confirmation (the unified
+        # header + what was shared + the cost), not just silently send to Claude.
+        self.write(allow=["echo"], color=False)
+        r = self.proc(">> echo hi")
+        self.assertIn("note", r)
+        self.assertIn("$ echo hi", r["note"])         # unified header, echoes cmd
+        self.assertIn("shared 1 line with Claude", r["note"])
+        self.assertIn("used tokens", r["note"])
 
     def test_passthrough(self):
         self.assertEqual(self.proc("just a normal prompt"), {"passthrough": True})
@@ -868,6 +1027,15 @@ class TestLaunch(Base):
         self.assertEqual(_engine._osa_str('say "hi"'), 'say \\"hi\\"')
         self.assertEqual(_engine._osa_str('a\\b'), 'a\\\\b')
 
+    def test_launch_command_script_self_deletes(self):
+        # ST3: the last-resort .command file holds the raw command (may carry
+        # secrets), so it removes itself the moment Terminal runs it — before the
+        # command executes — rather than lingering until the 7-day sweep.
+        s = _engine._launch_command_script("aws login --token SECRET", "/bin/zsh")
+        self.assertIn('rm -f "$0"', s)
+        self.assertIn("aws login --token SECRET", s)
+        self.assertLess(s.index('rm -f "$0"'), s.index("aws login"))  # delete first
+
     def test_launch_registers_and_opens_now(self):
         # `sethu --launch vi` must both add vi to the launch list AND try to open
         # it immediately (the verb is an action, not just registration).
@@ -880,6 +1048,24 @@ class TestLaunch(Base):
             _engine.launch_in_terminal = orig
         self.assertEqual(opened, ["vi"])               # opened now
         self.assertIn("vi", _engine.load_config()["launch"])  # and registered
+
+    def test_launch_message_states_both_effects(self):
+        # UX5: --launch has a surprising DOUBLE effect (opens now AND permanently
+        # registers). The message must make both, and the persistence, explicit.
+        import io, contextlib
+        orig = _engine.launch_in_terminal
+        _engine.launch_in_terminal = lambda c: "↗ opened in a new tmux pane"
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                _engine.main(["--launch", "vi"])
+        finally:
+            _engine.launch_in_terminal = orig
+        out = buf.getvalue()
+        self.assertIn("launch list", out)      # registered
+        self.assertIn("persistent", out)       # …and it's persistent
+        self.assertIn("opened", out.lower())   # …and opened now
+        self.assertIn("--unlaunch", out)       # how to undo
 
 
 class TestFirstRunHint(Base):
@@ -1068,6 +1254,9 @@ class TestHookOutput(Base):
         self.assertEqual(hso["hookEventName"], "UserPromptSubmit")
         self.assertIn("hi", hso["additionalContext"])
         self.assertNotIn("decision", out)   # >> does NOT block
+        # UX2: and a local systemMessage surfaces the token cost to the user.
+        self.assertIn("used tokens", out["systemMessage"])
+        self.assertIn("shared 1 line with Claude", out["systemMessage"])
 
     def test_sethu_management_emits_block(self):
         self.write()
@@ -1103,14 +1292,34 @@ class TestPython3Shim(unittest.TestCase):
     def test_missing_python3_sethu_prompt_warns(self):
         # No python3 → a SETHU-looking prompt (> … / sethu …) is blocked with the
         # install guidance, so it doesn't silently do nothing (or leak to Claude).
+        # M5: the raw-bytes shim must tolerate the JSON formatting variations the
+        # engine's json.loads()+lstrip() handles — space after the colon, pretty/
+        # multi-line JSON, and leading-whitespace escapes (\t) in the value.
         for prompt in ('{"prompt":"> ls"}', '{"prompt":"  > ls"}',
-                       '{"prompt":"sethu --runner"}'):
+                       '{"prompt":"sethu --runner"}',
+                       '{"prompt": "> ls"}',                 # space after colon
+                       '{"prompt"  :  "> ls"}',              # space around colon
+                       '{\n  "prompt": "> ls"\n}',           # pretty / multi-line
+                       '{"prompt":"\\t> ls"}',               # JSON \t before >
+                       '{"other":"x",\n "prompt":"sethu x"}',   # key not on line 1
+                       '{"role":"prompt","prompt":"> ls"}'):  # decoy value == "prompt"
             r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
                           stdin=prompt)
             self.assertEqual(r.returncode, 0, prompt)
             out = json.loads(r.stdout)               # valid JSON
             self.assertEqual(out["decision"], "block", prompt)
             self.assertIn("python3", out["reason"], prompt)
+
+    def test_missing_python3_nonsethu_stays_silent(self):
+        # M5 regression: tolerant parsing must NOT over-block. A normal prompt —
+        # even one whose text merely contains a `>` — passes through silently.
+        for prompt in ('{"prompt":"hello"}', '{"prompt":"is 3 > 2 true?"}',
+                       '{"prompt": "just chatting"}',
+                       '{"prompt":"a \\"prompt\\":\\"> x\\" in text"}'):
+            r = self._run("prompt", "sethu_hook.py", {"PATH": "/nonexistent"},
+                          stdin=prompt)
+            self.assertEqual(r.returncode, 0, prompt)
+            self.assertEqual(r.stdout.strip(), "", prompt)
 
     def test_present_python3_runs_hook(self):
         # With python3, the shim execs it — session_start emits the first-run
@@ -1133,7 +1342,7 @@ class TestCoverageEnforcement(unittest.TestCase):
         engine = open(_engine.__file__).read()
         tests = open(__file__).read()
         calls = re.findall(r"add_argument\((.*?)\)", engine, re.DOTALL)
-        args = {opt for body in calls for opt in re.findall(r'"(--[a-z]+)"', body)}
+        args = {opt for body in calls for opt in re.findall(r'"(--[a-z-]+)"', body)}
         self.assertTrue(args, "no CLI args discovered — regex likely broke")
         missing = sorted(a for a in args if a not in tests)
         self.assertEqual(missing, [], f"CLI args with no test reference: {missing}")

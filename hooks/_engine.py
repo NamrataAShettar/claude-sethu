@@ -30,6 +30,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 
 # Defaults referenced in more than one place live here as named constants, so a
@@ -287,11 +288,13 @@ def load_config():
     except Exception:
         pass
     # Value-level normalization (beyond type), so a hand-edited config can't crash
-    # or misbehave: list entries must be strings (else `_matches` does str+int),
-    # mode must be a real mode, and the prefix can't be empty (which would match
-    # every prompt).
-    cfg["allow"] = [str(x) for x in cfg["allow"]]
-    cfg["launch"] = [str(x) for x in cfg["launch"]]
+    # or misbehave: list entries must be strings (else `_matches` does str+int) and
+    # are whitespace-canonicalized to match how --allow/--unallow store them (so an
+    # entry saved by an older version, or hand-edited with odd spacing, stays
+    # removable and can actually match a command); empties are dropped. Mode must be
+    # a real mode, and the prefix can't be empty (which would match every prompt).
+    cfg["allow"] = [c for c in (" ".join(str(x).split()) for x in cfg["allow"]) if c]
+    cfg["launch"] = [c for c in (" ".join(str(x).split()) for x in cfg["launch"]) if c]
     if cfg["mode"] not in MODES:
         cfg["mode"] = DEFAULTS["mode"]
     if not cfg["prefix"]:
@@ -395,6 +398,9 @@ INTERACTIVE = {
     "vi", "vim", "nvim", "nano", "emacs", "pico", "less", "more", "most", "man",
     "top", "htop", "btop", "ssh", "telnet", "tmux", "screen", "watch", "fg",
     "psql", "mysql", "sqlite3",
+    # language REPLs / debuggers that are (almost) always driven interactively;
+    # the batch form uses a different tool (runghc/elixir/erlc) or is niche.
+    "ghci", "iex", "erl", "gdb", "lldb",
     # full-screen TUIs a dev is likely to type
     "claude", "aider", "lazygit", "gitui", "tig", "k9s", "ncdu", "ranger", "nnn",
     "fzf", "mc", "vifm",
@@ -406,7 +412,31 @@ INTERACTIVE = {
 # With a script, `-c CODE`, or `-m MODULE` they run to completion and return, so
 # they're fine for the captured runner. `python script.py` is batch; `python` is
 # a REPL. `-i` forces the prompt open, so it stays interactive.
-_REPL = {"python", "python3", "node", "irb", "ipython"}
+# Dual-mode interpreters/clients: used BOTH as an interactive REPL (bare, or with
+# -i) AND to run-and-exit (a script path, -e/-c code, or a subcommand). We inspect
+# the args to tell which — bare / flag-only → REPL (refuse, point at --launch); any
+# non-flag arg or a run-and-exit flag → batch (capture it). python and node get the
+# extra flag rules below; every other entry rides the generic non-flag-arg rule
+# (which is why adding one here only affects its BARE form — `X script` already runs
+# regardless of membership). Always-interactive programs go in INTERACTIVE instead.
+_REPL = {
+    "python", "python3", "python2", "pypy", "ipython",   # python family
+    "node", "deno",                                       # JS/TS
+    "irb",                                                # ruby REPL
+    "php", "lua", "luajit", "R", "julia",                # other languages
+    "scala", "clojure", "clj", "tclsh",
+    "redis-cli", "mongosh",                               # DB clients: bare = REPL, `cmd` = batch
+}
+# REPL flags that make the interpreter run-and-exit instead of dropping into a
+# prompt — so the command is batch (safe to capture), not interactive. -c/-m take
+# code to run; the version/help flags print and exit. Prompt-preserving flags
+# (-q/-u/-O/-b, python's verbose -v) are deliberately absent: with no script they
+# still open a REPL.
+_REPL_BATCH_FLAGS = {"-c", "-m", "-V", "--version", "-h", "--help"}
+_REPL_BATCH_FLAGS_NODE = {"-v", "-e", "--eval", "-p", "--print"}
+# The python family is the outlier where `-v` means VERBOSE (still a REPL); for
+# every other interpreter `-v` prints the version and exits (batch).
+_PYTHON_REPL = {"python", "python3", "python2", "pypy", "ipython"}
 
 # Shell builtins that set state (env vars, aliases). They only persist in shell
 # mode; in cwd/stateless each command is a throwaway subprocess, so running one is
@@ -431,14 +461,18 @@ def is_interactive(cmd):
     if prog in _REPL:
         args = toks[1:]
         if "-i" in args:
-            return True  # explicit interactive flag
-        # Any non-flag argument (a script path) or -c/-m means batch mode.
-        for i, a in enumerate(args):
-            if a in ("-c", "-m"):
+            return True  # explicit interactive flag wins
+        batch = _REPL_BATCH_FLAGS
+        if prog == "node":
+            batch = _REPL_BATCH_FLAGS | _REPL_BATCH_FLAGS_NODE
+        elif prog not in _PYTHON_REPL:
+            batch = _REPL_BATCH_FLAGS | {"-v"}  # -v = version (exits) everywhere but python
+        # A run-and-exit flag (-c/-m/--version/--help), or any non-flag arg (a
+        # script path / -c's code), means it runs and exits → batch, not a REPL.
+        for a in args:
+            if a in batch or not a.startswith("-"):
                 return False
-            if not a.startswith("-"):
-                return False  # a script path → runs and exits
-        return True  # bare `python`, or only passive flags → REPL
+        return True  # bare interpreter, or only prompt-preserving flags → REPL
     return prog in INTERACTIVE
 
 
@@ -485,6 +519,40 @@ READONLY_GIT = {
 _DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
+# git global options safe to skip before the subcommand: they change output/
+# pathspec handling but do NOT retarget the repo or run code. Deliberately NOT
+# here: -C / --git-dir / --work-tree / --namespace point git at a DIFFERENT repo,
+# whose .git/config git then trusts and can run programs from (core.fsmonitor on
+# status/diff, diff.external/textconv on diff) with no command-line flag. So those
+# (like -c / --config-env / --exec-path) make the command not-read-only; a user who
+# trusts that repo can --allow it.
+_GIT_GLOBAL_NOARG = frozenset({
+    "-p", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
+    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+    "--icase-pathspecs", "--no-optional-locks",
+})
+
+
+def _git_subcommand(toks):
+    """Resolve git's subcommand, skipping only the leading NO-ARG global options
+    that don't retarget the repo, so `git --no-pager status` is understood as
+    `status`. Returns (sub, safe): `sub` is the subcommand token ('' if none);
+    `safe` is False when ANY other option is seen before the subcommand — repo-
+    retargeting (`-C`, `--git-dir`, …) or exec-capable (`-c key=value`,
+    `--config-env`, `--exec-path`) globals and anything unrecognized can run
+    arbitrary code from config, so the command is never auto-read-only."""
+    i = 1
+    while i < len(toks):
+        t = toks[i]
+        if not t.startswith("-"):
+            return (t, True)                       # the subcommand
+        if t in _GIT_GLOBAL_NOARG:
+            i += 1
+        else:
+            return ("", False)                      # retarget / exec / unknown → not read-only
+    return ("", True)                               # ran out: no subcommand
+
+
 def _flag_present(toks, flags):
     """True if any token is one of `flags` (also matching `--flag=x` and a
     combined short flag like `-oFILE`)."""
@@ -509,11 +577,12 @@ def is_readonly_safe(cmd):
             return False
         prog = os.path.basename(toks[0])
         if prog == "git":
-            sub = toks[1] if len(toks) > 1 else ""
-            if sub not in READONLY_GIT:
+            sub, safe = _git_subcommand(toks)
+            if not safe or sub not in READONLY_GIT:
                 return False
-            # read-only subcommands can still write a file via --output=FILE.
-            if _flag_present(toks, ("--output",)):
+            # A read-only subcommand can still write a file (`--output=FILE`) or run
+            # an external program (`--ext-diff` invokes the configured diff.external).
+            if _flag_present(toks, ("--output", "--ext-diff")):
                 return False
         elif prog == "find":
             if any(t in _FIND_WRITE_PRIMARIES for t in toks):
@@ -615,7 +684,7 @@ def launch_in_terminal(cmd):
         try:
             fd, path = tempfile.mkstemp(prefix="sethu-launch-", suffix=".command")
             with os.fdopen(fd, "w") as f:
-                f.write(f"#!/bin/bash\n{cmd}\nexec {shell} -l\n")
+                f.write(_launch_command_script(cmd, shell))
             # 0700, not 0755 — the script holds the raw command (which may carry
             # secrets) and `open` only needs owner-execute. Don't widen perms on a
             # user-command file sitting in a shared temp dir.
@@ -625,6 +694,15 @@ def launch_in_terminal(cmd):
         except Exception:
             pass
     return None
+
+
+def _launch_command_script(cmd, shell):
+    """Body of the .command last-resort launch file. It removes ITSELF first, so
+    the raw command — which may carry secrets — doesn't linger on disk in a shared
+    temp dir once Terminal has read the file. Unlinking a file that's already
+    executing is safe on Unix (the running shell keeps its open handle); the 7-day
+    _sweep_temp is only the backstop for a file that's never opened."""
+    return f'#!/bin/bash\nrm -f "$0"\n{cmd}\nexec {shell} -l\n'
 
 
 # ── persistent shell (shell mode) ─────────────────────────────────────────────
@@ -768,10 +846,20 @@ def _why_refused(cmd, cfg):
         return ""
     prog = os.path.basename(toks[0])
     if prog == "git":
-        sub = toks[1] if len(toks) > 1 else ""
+        sub, safe = _git_subcommand(toks)
+        if not safe:
+            return ("read-only mode won't auto-run git with `-c`/`--config-env`/"
+                    "`--exec-path` or a repo-retargeting option (`-C`, `--git-dir`, "
+                    "`--work-tree`), because a repo's own config can run external "
+                    "programs even on `status`/`diff`. Allow the exact command below "
+                    "if you trust it.")
         if sub and sub not in READONLY_GIT:
             return (f"`git {sub}` can change the repo, so read-only mode doesn't run "
                     f"it automatically (read-only git is status/log/diff/show/blame/…).")
+        if sub in READONLY_GIT and _flag_present(toks, ("--ext-diff",)):
+            return ("`git --ext-diff` runs an external diff program, so read-only "
+                    "mode won't run it automatically. Drop `--ext-diff` to run it "
+                    "read-only, or allow the exact command below.")
     if prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
         return (f"`{prog}` is read-only, but this flag writes a file, so read-only "
                 f"mode won't run it automatically. Drop the flag to run it read-only "
@@ -784,8 +872,9 @@ def _why_refused(cmd, cfg):
                 "`&`, or `|`, redirects (`>`), or `$(…)`. Run the parts as separate "
                 "`>` commands, or allow the exact command below.")
     if prog not in READONLY:
-        return (f"`{prog}` isn't a read-only command, so read-only mode won't run it "
-                f"automatically.")
+        return (f"sethu doesn't recognize `{prog}` as a read-only command, so "
+                f"read-only mode won't run it automatically. See what it does run "
+                f"with `sethu --readonly-list`.")
     return ""
 
 
@@ -905,7 +994,15 @@ def process(prompt, data):
             f"----- BEGIN COMMAND OUTPUT -----\n{shown}\n"
             f"----- END COMMAND OUTPUT -----{tail}"
         )
-        return {"context": ctx}
+        # `>>` costs tokens (the whole product is about NOT paying them by default),
+        # so surface it locally — otherwise the user sees nothing and the cost is
+        # invisible. Same unified header as `>`, then what was sent + the cost.
+        n = len(shown.splitlines())
+        summary = (f"shared {n} line{'s' if n != 1 else ''} with Claude"
+                   if shown and shown != "(no output)"
+                   else "ran it and shared the (empty) result with Claude")
+        confirm = f"{header}\n{summary} (this used tokens)."
+        return {"context": ctx, "note": confirm}
     body = f"{header}\n{shown}"
     if code != 0 and _looks_full_screen(out):
         # A full-screen TUI captured mid-draw emits the alt-screen escape AND fails or
@@ -938,6 +1035,7 @@ Let a command run (read-only ones like ls / cat / git log run already):
   sethu --allow "cmd"      permit a command that writes or isn't read-only (undo: --unallow)
   sethu --launch "cmd"     interactive (vim/top/ssh) or long-running: opens a terminal (undo: --unlaunch)
   sethu --readonly off     stop auto-running read-only commands
+  sethu --readonly-list    show which commands run without --allow
   sethu --trust on         run ANY `>` command, no allowlist (footgun)
 
 How commands run:
@@ -987,6 +1085,29 @@ class _Parser(argparse.ArgumentParser):
         sys.exit(2)
 
 
+def readonly_list_text():
+    """On-demand answer to 'what does read-only mode run without --allow, and why
+    is my command not on it' — the companion to the 'not recognized' refusal. Names
+    are sorted so the output is stable (set iteration order isn't). Not a semantic
+    analyzer: it's this curated set plus the flag guards, and anything else is
+    refused with a reason + a one-line --allow."""
+    names = textwrap.fill("  ".join(sorted(READONLY)), width=74,
+                          initial_indent="  ", subsequent_indent="  ")
+    guards = (
+        "  sort -o/--output · xxd -r · date -s/--set · find -exec/-delete/… · "
+        "git writes (push/commit/…) · git -c/--config-env/--exec-path · "
+        "git -C/--git-dir (foreign repo) · git --ext-diff/--output"
+    )
+    return (
+        "read-only mode runs these commands without asking (no --allow needed):\n\n"
+        f"{names}\n\n"
+        "…but only without their write/exec flags, which stay refused:\n"
+        f"{guards}\n\n"
+        "Anything else is refused with a reason. To run one anyway:\n"
+        '  sethu --allow "<command>"'
+    )
+
+
 def main(argv=None):
     args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
     if not args_list:
@@ -1005,6 +1126,8 @@ def main(argv=None):
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
     p.add_argument("--readonly", choices=["on", "off"],
                    help="auto-allow a curated set of read-only commands")
+    p.add_argument("--readonly-list", action="store_true", dest="readonly_list",
+                   help="list the commands read-only mode runs without --allow")
     p.add_argument("--trust", choices=["on", "off"],
                    help="bypass the allowlist — run ANY command (footgun)")
     p.add_argument("--rc", choices=["on", "off"],
@@ -1020,6 +1143,9 @@ def main(argv=None):
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
     a = p.parse_args(args_list)
 
+    if a.readonly_list:
+        print(readonly_list_text())
+        return
     if a.restart:
         print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
         return
@@ -1035,35 +1161,54 @@ def main(argv=None):
 
     cfg = load_config()
     changed = False
-    if a.allow:
-        if a.allow not in cfg["allow"]:
-            cfg["allow"].append(a.allow)
-        print(f"✔ added to allow: {a.allow!r}")
-        changed = True
-    if a.launch:
-        val = a.launch
-        if val not in cfg["launch"]:
-            cfg["launch"].append(val)
-        changed = True
-        # "launch" is a verb — open it now, not just register it. From here on
-        # `> <val>` opens a terminal too (that's what the launch list is for).
-        status = launch_in_terminal(val)
-        note = ("  Note: the launched terminal is a plain shell — it does NOT "
-                "share sethu's allowlist / mode / cwd.")
-        if status:
-            print(f"✔ {status} — opened {val!r}. From now on `> {val}` opens a "
-                  f"terminal too.\n{note}")
+    noop = False  # printed truthful feedback but changed nothing → don't dump config
+    if a.allow is not None:
+        # Canonicalize whitespace so `--allow "a   b"` and `unallow a b` are the
+        # same entry (the subcommand path already collapses spaces); a stored entry
+        # you can't remove was the bug.
+        val = " ".join(a.allow.split())
+        if not val:
+            print("nothing to allow (the command was empty)."); noop = True
+        elif val in cfg["allow"]:
+            print(f"already allowed: {val!r} (no change)."); noop = True
         else:
-            print(f"✔ added {val!r} to the launch list — `> {val}` will open it in a "
-                  f"terminal. (Couldn't open one now — no tmux pane, and auto-open "
-                  f"is macOS/tmux only; run `{val}` in your terminal.)\n{note}")
-    for field, key in (("unallow", "allow"), ("unlaunch", "launch")):
-        val = getattr(a, field)
-        if val:
-            if val in cfg[key]:
-                cfg[key].remove(val)
-            print(f"✔ removed from {key}: {val!r}")
+            cfg["allow"].append(val)
+            print(f"✔ added to allow: {val!r}"); changed = True
+    if a.launch is not None:
+        val = " ".join(a.launch.split())
+        if not val:
+            print("nothing to launch (the command was empty)."); noop = True
+        else:
+            # "launch" is a verb — open it now, not just register it. From here on
+            # `> <val>` opens a terminal too (that's what the launch list is for).
+            if val not in cfg["launch"]:
+                cfg["launch"].append(val)
             changed = True
+            status = launch_in_terminal(val)
+            note = ("  Note: the launched terminal is a plain shell: it does NOT "
+                    "share sethu's allowlist / mode / cwd.")
+            if status:
+                print(f"✔ launched {val!r} ({status}) AND added it to the launch list. "
+                      f"That's persistent, so from now on `> {val}` opens a terminal "
+                      f"instead of running captured. Undo with `sethu --unlaunch "
+                      f"{val!r}`.\n{note}")
+            else:
+                print(f"✔ added {val!r} to the launch list (persistent), so from now on "
+                      f"`> {val}` opens a terminal. Couldn't open one right now (no tmux "
+                      f"pane; auto-open is macOS/tmux only), so run `{val}` in your "
+                      f"terminal. Undo with `sethu --unlaunch {val!r}`.\n{note}")
+    for field, key, name in (("unallow", "allow", "allowlist"),
+                             ("unlaunch", "launch", "launch list")):
+        val = getattr(a, field)
+        if val is not None:
+            val = " ".join(val.split())
+            if not val:
+                print(f"nothing to remove (the command was empty)."); noop = True
+            elif val in cfg[key]:
+                cfg[key].remove(val)
+                print(f"✔ removed from {key}: {val!r}"); changed = True
+            else:
+                print(f"not in the {name}: {val!r} (nothing removed)."); noop = True
     if a.mode:
         cfg["mode"] = a.mode
         killed = kill_daemons()  # start the new mode from a clean slate
@@ -1114,6 +1259,8 @@ def main(argv=None):
     if changed:
         save_config(cfg)
         return
+    if noop:
+        return  # we already said "already allowed" / "not in list" / "nothing to …"
     _print_config(cfg)  # default / --runner: show current config
 
 

@@ -31,15 +31,47 @@ if [ "$role" = "session" ]; then
 fi
 
 # Prompt role: only speak up if this looks like a sethu command, so normal typing
-# stays silent. Parse with builtins only.
-IFS= read -r input
-case "$input" in
-    *'"prompt":"'*)
-        rest=${input#*'"prompt":"'}          # text after the prompt key
-        while [ "${rest# }" != "$rest" ]; do rest=${rest# }; done  # strip spaces
+# stays silent. Parse with builtins only (no python3/grep), tolerating the JSON
+# formatting variations Claude Code may use — pretty-printed / multi-line, and
+# spaces around the colon — and matching the engine's prompt.lstrip() on the
+# value (the shim sees raw bytes, so leading whitespace can be real spaces OR
+# JSON escapes like \t/\n). Getting this wrong silently leaks a `>` command to
+# the model instead of blocking it.
+ws=$(printf ' \t\r')                              # whitespace to strip
+
+input=
+while IFS= read -r line || [ -n "$line" ]; do     # read ALL of stdin, not line 1
+    input="$input$line"
+done
+
+work=$input
+while :; do
+    case "$work" in
+        *'"prompt"'*) ;;
+        *) break ;;                               # no (more) "prompt" → nothing to block
+    esac
+    rest=${work#*'"prompt"'}                       # after this "prompt" occurrence
+    work=$rest                                     # advance, in case it's a decoy
+    rest=${rest#"${rest%%[!$ws]*}"}               # strip ws after the key name
+    case "$rest" in
+        :*) ;;                                     # a colon follows → this is the key
+        *) continue ;;                             # not a key (e.g. a value == "prompt") → keep scanning
+    esac
+    rest=${rest#:}                                # drop the colon
+    rest=${rest#"${rest%%[!$ws]*}"}               # strip ws after the colon
+    rest=${rest#\"}                               # drop the value's opening quote
+    rest=${rest#"${rest%%[!$ws]*}"}               # strip real leading ws in the value
+    while :; do                                   # …and leading JSON ws escapes
         case "$rest" in
-            '>'*|sethu*) printf '{"decision":"block","reason":"%s"}\n' "$msg" ;;
+            '\t'*|'\n'*|'\r'*|'\f'*)
+                rest=${rest#??}
+                rest=${rest#"${rest%%[!$ws]*}"} ;;
+            *) break ;;
         esac
-        ;;
-esac
+    done
+    case "$rest" in
+        '>'*|sethu*) printf '{"decision":"block","reason":"%s"}\n' "$msg" ;;
+    esac
+    break                                          # handled the real prompt key
+done
 exit 0

@@ -108,12 +108,18 @@ def main():
     if "block" in result:
         print(json.dumps({"decision": "block", "reason": result["block"]}))
     elif "context" in result:
-        print(json.dumps({
+        out = {
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": result["context"],
             }
-        }))
+        }
+        # `>>` sends output to the model (costs tokens) but can't block, so the
+        # user would otherwise see nothing. systemMessage shows the local
+        # confirmation so the token cost is visible at the moment it's incurred.
+        if result.get("note"):
+            out["systemMessage"] = result["note"]
+        print(json.dumps(out))
     # passthrough -> print nothing
     sys.exit(0)
 
