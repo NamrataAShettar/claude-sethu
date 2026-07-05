@@ -204,8 +204,8 @@ turn, so a `>` typed mid-response is read by the model (and costs tokens), not r
 by sethu. Send `> cmd` when Claude is idle.
 
 **"`X` isn't in the gated set."** sethu is gated by default. The message tells you
-why (e.g. `git`/`npm` can write or run other programs, so they're not gated). To
-permit it, `sethu --allow X` (the whole tool). If it's interactive (`vim`, a bare REPL), use
+why (e.g. `git`/`npm` can write or run other programs, so they're not in the default
+set). To permit it, `sethu --allow X` (the whole tool). If it's interactive (`vim`, a bare REPL), use
 `sethu --launch "X"` instead (allowlisting can't make those run). To drop the
 guardrails entirely and run anything, there's `sethu --trust on`, but it's a
 footgun, so prefer allowlisting the specific commands you actually want.

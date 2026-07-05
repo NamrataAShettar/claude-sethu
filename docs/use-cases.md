@@ -15,8 +15,8 @@ the style:
 
 ## 1. Git — the most common use
 Peek at repo state constantly without paying tokens or cluttering the chat. `git`
-can write and (via config/aliases) run other programs, so it isn't gated — allow it
-once, then all of git runs:
+can write and (via config/aliases) run other programs, so it isn't gated by default —
+allow it once, then all of git runs:
 
 ```text
 sethu --allow git          # one-time; permits the whole `git` tool (any subcommand)

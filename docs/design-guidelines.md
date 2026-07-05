@@ -85,14 +85,17 @@ with one, either don't make it or update this doc deliberately.
   - Do NOT make the auto-allow set mode-dependent (e.g. auto-permitting `source` only in
     shell mode) — it's confusing and, for `source`, it would open arbitrary execution in
     the default mode. If you're tempted to special-case a mode's permissions, don't.
-- **Gated is by TOOL, not by flag — and a tool is gated only if it's flag-safe.** A tool
-  is in `GATED` iff NO flag/operand can make it write, delete, or exec (audited;
-  `TestGatedSetIsFlagSafe` enforces it). There is deliberately **no per-flag policing** —
-  a flag denylist is tedious AND leaky (it can't even see `uniq IN OUT` / `xxd IN OUT`
-  positional-write operands). Tools that can write/exec via a flag (`git`, `find`, `fd`,
-  `rg`, `sort`, `yq`, …) are NOT gated; the user opts into their whole surface with
-  `--allow <tool>` (a launcher-warning fires). Gated is a safe *default* / guardrail, not
-  a sandbox — the user can run anything via their terminal, `!`, `--allow`, or `--trust`.
+- **The DEFAULT set is by TOOL and flag-safe; `--allow` is by TOOL at the user's
+  discretion.** A tool auto-runs *without* `--allow` (is in `GATED`, the built-in default)
+  only if NO flag/operand can make it write, delete, or exec — audited, enforced by
+  `TestGatedSetIsFlagSafe`. There is deliberately **no per-flag policing** — a flag
+  denylist is tedious AND leaky (it can't even see `uniq IN OUT` / `xxd IN OUT`
+  positional-write operands). Tools that CAN write/exec via a flag (`git`, `find`, `fd`,
+  `rg`, `sort`, `yq`, …) are NOT gated by default; the user opts into their **whole
+  surface** with `--allow <tool>` (a launcher-warning fires) — that's user discretion, not
+  a flag-safety claim, so a `--allow`'d tool need not be flag-safe. Gated is a safe
+  *default* / guardrail, not a sandbox — the user can run anything via their terminal, `!`,
+  `--allow`, or `--trust`.
 - **Allowlist stays injection-hardened.** An allowlisted command may only be
   followed by plain arguments — no unquoted pipe/redirect/`;`/`&&`/subshell/
   substitution. Allowing `ls` must never permit `ls; rm`.
