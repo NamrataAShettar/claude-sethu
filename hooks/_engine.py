@@ -47,6 +47,11 @@ MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
 # on-disk log (which only stores what we captured). A runaway (`yes`, `cat big.iso`,
 # `find /`) is killed at the cap and marked truncated, so it can't OOM or fill disk.
 # `maxLines` only caps the DISPLAY; this is the safety bound. _shelld.py mirrors it.
+# 8 MiB is a heuristic, not a hard limit: generous for real inspection output
+# (~100k+ lines) yet a trivial footprint for a runaway (killed in ~10ms at the cap).
+# Deliberately fixed, not a config knob — it's a rarely-relevant safety floor; if it
+# ever truncates output someone legitimately wanted, make it configurable (see BACKLOG)
+# rather than just bumping the number.
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024   # 8 MiB
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
