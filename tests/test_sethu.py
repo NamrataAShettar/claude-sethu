@@ -49,6 +49,9 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   temp-file sweep                        TestSweep                              [x]
   socket path + 0600 perms               TestSocketPath, TestSocketPerms        [x]
   kill / reap shell daemons              TestKillDaemons                        [x]
+  timeout recovery (no wedge/bleed) H3   TestShellMode                          [x]
+  output byte-cap (RAM/disk) ST1/ST7     TestOutputCap / TestShellMode          [x]
+  daemon-spawn lock (L7, flock) / marker  TestSpawnLock / TestFirstRunHint       [x]
   first-run welcome hint                 TestFirstRunHint                       [x]
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
@@ -901,6 +904,29 @@ class TestShellMode(Base):
         r = self.proc("> echo PG=$GIT_PAGER", sid=sid)
         self.assertIn("PG=cat", r["block"])
 
+    def test_timeout_recovers_from_sigint_surviving_job(self):
+        # H3: a job that ignores Ctrl-C (`trap '' INT`) times out, but the shell
+        # must NOT stay wedged — the very next command has to run normally (the
+        # daemon escalates to SIGKILL / respawns).
+        sid = "test-shell-h3-wedge"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", trust=True, timeout=2, color=False)
+        self.proc("> trap '' INT; sleep 30", sid=sid)          # times out (~2s)
+        r = self.proc("> echo RECOVERED_OK", sid=sid)["block"]  # must work
+        self.assertIn("RECOVERED_OK", r)
+        self.assertNotIn("timed out", r)
+
+    def test_timeout_no_output_bleed_or_late_exec(self):
+        # H3: a timed-out command's late output must not bleed into the next
+        # command, and a fresh command must be clean.
+        sid = "test-shell-h3-bleed"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", trust=True, timeout=2, color=False)
+        self.proc("> trap '' INT; sleep 3; echo LEAKED_LATE", sid=sid)  # times out
+        r = self.proc("> echo FRESH_QQQ", sid=sid)["block"]
+        self.assertIn("FRESH_QQQ", r)
+        self.assertNotIn("LEAKED_LATE", r)
+
     def test_real_uuid_session_id(self):
         # Regression: a full-length UUID must not overflow the AF_UNIX path.
         sid = "a253f39f-aecf-416f-b1f0-2702df515154"
@@ -909,6 +935,51 @@ class TestShellMode(Base):
         r = self.proc("> echo runs_ok", sid=sid)
         self.assertIn("runs_ok", r["block"])
         self.assertNotIn("path too long", r["block"])
+
+    def test_shell_mode_caps_runaway_output(self):
+        # ST1/ST7: a runaway (`yes`) in shell mode is stopped at the byte cap and
+        # the shell recovers (next command works), with the cap note surfaced.
+        sid = "test-shell-cap"
+        self.addCleanup(self._shutdown, sid)
+        self.write(mode="shell", trust=True, maxLines=5, color=False)
+        r = self.proc("> yes", sid=sid)["block"]
+        self.assertIn("capped at", r)
+        self.assertIn("RECOVER_OK", self.proc("> echo RECOVER_OK", sid=sid)["block"])
+
+
+class TestOutputCap(Base):
+    """ST1: captured output is byte-capped in RAM and on disk (maxLines only caps
+    the DISPLAY). A runaway is killed at the cap, not buffered unbounded."""
+
+    def test_run_capture_kills_runaway_at_cap(self):
+        out, code = _engine.run_capture("yes")   # infinite output
+        self.assertLessEqual(len(out.encode("utf-8", "replace")),
+                             _engine.MAX_CAPTURE_BYTES + 4096)
+        self.assertIn("capped at", out)
+        self.assertIsNone(code)                  # killed, no clean exit
+
+    def test_run_capture_normal_command_unaffected(self):
+        out, code = _engine.run_capture("printf 'a\\nb\\nc\\n'")
+        self.assertEqual(code, 0)
+        self.assertNotIn("capped", out)
+        self.assertEqual(out.strip(), "a\nb\nc")
+
+    def test_run_capture_stderr_captured(self):
+        out, _ = _engine.run_capture("ls /nonexistent-sethu-xyz")
+        self.assertIn("nonexistent-sethu-xyz", out)   # stderr merged into output
+
+    def test_exact_cap_boundary_is_clean_finish(self):
+        # LOW-1: a command emitting EXACTLY the cap then EOF is not a runaway —
+        # it must keep its exit code and NOT be flagged truncated.
+        n = _engine.MAX_CAPTURE_BYTES
+        out, code = _engine.run_capture(f"head -c {n} /dev/zero")
+        self.assertEqual(code, 0)
+        self.assertNotIn("capped", out)
+
+    def test_cap_note_survives_display_truncation(self):
+        # The note leads the output, so maxLines truncation can't bury it (cwd mode).
+        self.write(trust=True, maxLines=3, color=False)
+        self.assertIn("capped at", self.proc("> yes")["block"])
 
 
 class TestStateBuiltinHint(Base):
@@ -1115,6 +1186,14 @@ class TestFirstRunHint(Base):
         self.assertEqual(os.path.dirname(_engine._welcome_marker()),
                          os.path.dirname(_engine.config_path()))
 
+    def test_lost_race_stays_quiet(self):
+        # If a concurrent session already claimed the marker (O_EXCL), stay quiet
+        # even though this call passed the exists() check before it was created.
+        m = _engine._welcome_marker()
+        os.makedirs(os.path.dirname(m), exist_ok=True)
+        os.close(os.open(m, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        self.assertIsNone(_engine.first_run_hint())
+
     def test_skips_hint_when_marker_unwritable(self):
         # If the marker can't be persisted, don't nudge (else it repeats every
         # session on a read-only config dir).
@@ -1127,6 +1206,37 @@ class TestFirstRunHint(Base):
         finally:
             os.environ["SETHU_CONFIG"] = self.cfg
             os.unlink(f.name)
+
+
+class TestSpawnLock(Base):
+    """L7: only one client spawns a daemon per session; the rest wait (fcntl.flock)."""
+
+    def _sock(self, name):
+        p = os.path.join(tempfile.gettempdir(), name)
+        # flock never unlinks its lock file (by design), so clean it up after the test.
+        self.addCleanup(lambda: os.path.exists(p + ".lock") and os.unlink(p + ".lock"))
+        return p
+
+    def test_lock_is_exclusive(self):
+        sock = self._sock("sethu-testlock-p9.sock")
+        fd = _engine._acquire_spawn_lock(sock)
+        self.assertIsNotNone(fd)                                   # winner spawns
+        try:
+            self.assertIsNone(_engine._acquire_spawn_lock(sock))  # loser blocked
+        finally:
+            _engine._release_spawn_lock(fd)
+        fd2 = _engine._acquire_spawn_lock(sock)                    # released → reacquire
+        self.assertIsNotNone(fd2)
+        _engine._release_spawn_lock(fd2)
+
+    def test_leftover_lock_file_does_not_block(self):
+        # flock guards the holder, not the file — a dead session's leftover lock file
+        # (nobody flocked) must be immediately acquirable, not stuck until a timeout.
+        sock = self._sock("sethu-testleftover-p9.sock")
+        open(sock + ".lock", "w").close()          # stale file, no live holder
+        fd = _engine._acquire_spawn_lock(sock)
+        self.assertIsNotNone(fd)
+        _engine._release_spawn_lock(fd)
 
 
 class TestConfig(Base):

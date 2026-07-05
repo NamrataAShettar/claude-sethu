@@ -25,7 +25,9 @@ import hashlib
 import json
 import os
 import re
+import select
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -41,6 +43,16 @@ import time
 # daemon inherits it too — _shelld.py mirrors this, keep the two in sync).
 CMD_TIMEOUT = 20
 MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
+# Hard byte ceiling on a single command's captured output — bounds RAM AND the
+# on-disk log (which only stores what we captured). A runaway (`yes`, `cat big.iso`,
+# `find /`) is killed at the cap and marked truncated, so it can't OOM or fill disk.
+# `maxLines` only caps the DISPLAY; this is the safety bound. _shelld.py mirrors it.
+# 8 MiB is a heuristic, not a hard limit: generous for real inspection output
+# (~100k+ lines) yet a trivial footprint for a runaway (killed in ~10ms at the cap).
+# Deliberately fixed, not a config knob — it's a rarely-relevant safety floor; if it
+# ever truncates output someone legitimately wanted, make it configurable (see BACKLOG)
+# rather than just bumping the number.
+MAX_CAPTURE_BYTES = 8 * 1024 * 1024   # 8 MiB
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
             "trust": False, "rc": False, "color": True,
@@ -180,6 +192,7 @@ def _sweep_temp(now, force=False):
         if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
                 (n.startswith("sethu-launch-") and n.endswith(".command")) or
                 (n.startswith("sethu-") and n.endswith(".sock")) or
+                (n.startswith("sethu-") and n.endswith(".sock.lock")) or
                 n.startswith("sethu-cwd-")):
             continue
         try:
@@ -252,7 +265,12 @@ def first_run_hint():
         return None
     try:
         os.makedirs(os.path.dirname(marker), exist_ok=True)
-        open(marker, "w").close()
+        # Atomic claim (O_EXCL): if two sessions start together and both pass the
+        # exists() check above, only one wins the create — the other gets
+        # FileExistsError and stays quiet, so the welcome shows exactly once.
+        os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    except FileExistsError:
+        return None
     except Exception:
         # Can't record that we showed it → skip, so a read-only config dir doesn't
         # get the "once per machine" hint on every single session.
@@ -559,24 +577,73 @@ def _timeout_msg(secs, cmd):
 
 
 def run_capture(cmd, cwd=None, timeout=None):
-    """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error."""
+    """Run `cmd`, return (output, exit_code). exit_code is None on timeout/error.
+    Streams output with a byte cap (MAX_CAPTURE_BYTES): a runaway that produces
+    more (`yes`, `cat big.iso`, `find /`) is KILLED at the cap and marked
+    truncated, so it can't balloon RAM or the on-disk log. stdin=DEVNULL so a
+    program waiting on input gets EOF instead of hanging; timeout kept under the
+    UserPromptSubmit hook budget."""
     # GIT_PAGER/PAGER=cat so paged commands (git log, etc.) never block on a pager.
     env = dict(os.environ, NO_COLOR="1", PAGER="cat", GIT_PAGER="cat")
+    t = timeout or cmd_timeout()
     try:
-        # stdin=DEVNULL so a program waiting on input gets EOF instead of
-        # hanging; timeout kept under the UserPromptSubmit hook budget.
-        t = timeout or cmd_timeout()
-        r = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=t,
-            env=env, stdin=subprocess.DEVNULL,
+        # start_new_session so a runaway and its children can be killed as a group.
+        p = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, env=env, start_new_session=True,
             cwd=cwd if (cwd and os.path.isdir(cwd)) else None,
         )
-        out = (r.stdout or "") + (("\n" + r.stderr) if r.stderr else "")
-        return (out.strip() or "(no output)", r.returncode)
-    except subprocess.TimeoutExpired:
-        return (_timeout_msg(t, cmd), None)
     except Exception as e:
         return (f"error: {e}", None)
+    buf = bytearray()
+    truncated = timed_out = False
+    fd = p.stdout.fileno()
+    deadline = time.time() + t
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            timed_out = True
+            break
+        r, _, _ = select.select([fd], [], [], min(remaining, 0.1))
+        if r:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break                       # EOF — the command finished
+            buf.extend(chunk)
+            if len(buf) > MAX_CAPTURE_BYTES:
+                truncated = True            # STRICTLY over the cap → more is coming;
+                break                       # stop and kill it (exactly-cap-then-EOF
+                                            # is a clean finish, not a runaway)
+        elif p.poll() is not None:
+            break                           # exited, nothing left to read
+    if timed_out or truncated:
+        try:
+            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        except Exception:
+            pass
+    try:
+        p.stdout.close()
+    except Exception:
+        pass
+    try:
+        code = p.wait(timeout=2)
+    except Exception:
+        code = None
+    if timed_out:
+        return (_timeout_msg(t, cmd), None)
+    if truncated:
+        del buf[MAX_CAPTURE_BYTES:]         # drop the read-ahead past the cap
+    out = buf.decode("utf-8", "replace")
+    if truncated:
+        # Lead with the note so it survives the maxLines display truncation (an 8 MB
+        # runaway is always truncated, which would bury a trailing note).
+        mb = MAX_CAPTURE_BYTES // (1024 * 1024)
+        note = f"[output capped at {mb} MB — the command produced more and was stopped]"
+        return ((note + "\n" + out).strip(), None)
+    return (out.strip() or "(no output)", code)
 
 
 def _run_quiet(argv):
@@ -722,6 +789,47 @@ def _spawn_daemon(sock, cwd_hint, use_rc=False, timeout=None):
     )
 
 
+# L7: serialize daemon spawns for a session so two racing first-commands don't each
+# spawn a daemon (the second would unlink the first's socket and orphan a live daemon).
+# Uses fcntl.flock on `<sock>.lock`: the lock is atomic AND the kernel releases it if
+# the holder dies mid-spawn — so there's no stale-timeout heuristic and no reclaim race
+# (both were sources of a double-spawn / degraded window). The winner spawns; a loser
+# (flock would block) skips to the connect-retry loop and picks up the winner's daemon.
+# The lock file is intentionally NOT unlinked — flock guards the open file, not the
+# name, so unlinking it while held would let a concurrent open race onto a fresh inode
+# and both "win". `_sweep_temp` ages out dead sessions' lock files instead. fcntl is
+# imported lazily so this Unix-only path doesn't break `import _engine` on Windows
+# (where the portable cwd/stateless runner still works).
+
+
+def _acquire_spawn_lock(sock):
+    """Take the per-session spawn lock. Returns an open fd to hold until spawn+connect
+    finish (pass it to `_release_spawn_lock`), or None if another spawner holds it."""
+    import fcntl
+    try:
+        fd = os.open(sock + ".lock", os.O_CREAT | os.O_WRONLY, 0o600)
+    except OSError:
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except OSError:
+        os.close(fd)      # already held by another spawner
+        return None
+
+
+def _release_spawn_lock(fd):
+    import fcntl
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
 def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
     """Run `cmd` in this session's persistent shell (shell mode), returning
     (output, exit_code). Connects to the per-session daemon over its Unix socket,
@@ -737,19 +845,27 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
         try:
             s = _connect(sock, wait)  # an existing, live daemon
         except OSError:
-            # socket missing, or stale (daemon gone → "connection refused").
-            # Remove it and spawn a fresh daemon, then connect once it's up.
+            # socket missing, or stale (daemon gone → "connection refused"). Under a
+            # spawn lock (L7) so concurrent first-commands don't each spawn: the lock
+            # winner removes any stale socket and spawns; the loser skips straight to
+            # the connect-retry loop and picks up the winner's daemon.
+            lock_fd = _acquire_spawn_lock(sock)
             try:
-                os.unlink(sock)
-            except OSError:
-                pass
-            _spawn_daemon(sock, cwd_hint, use_rc, timeout)
-            for _ in range(80):
-                try:
-                    s = _connect(sock, wait)
-                    break
-                except OSError:
-                    time.sleep(0.05)
+                if lock_fd is not None:
+                    try:
+                        os.unlink(sock)
+                    except OSError:
+                        pass
+                    _spawn_daemon(sock, cwd_hint, use_rc, timeout)
+                for _ in range(80):
+                    try:
+                        s = _connect(sock, wait)
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+            finally:
+                if lock_fd is not None:
+                    _release_spawn_lock(lock_fd)
             if s is None:
                 return ("sethu shell error: could not start the shell daemon", None)
         s.sendall((cmd + "\n").encode("utf-8"))
@@ -759,14 +875,21 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
             if not chunk:
                 break
             data += chunk
-        # daemon replies "<exit_code>\n<output>", or "TIMEOUT\n<partial output>"
-        # when the command outran CMD_TIMEOUT (the daemon interrupts it so the
-        # shell recovers).
+            if len(data) > MAX_CAPTURE_BYTES + 4096:
+                break   # defensive: the daemon already caps, but never balloon here
+        # daemon replies "<exit_code>\n<output>", "TIMEOUT\n<partial>" (outran the
+        # timeout), or "CAPPED\n<partial>" (output hit the byte cap); in the last two
+        # the daemon interrupts the command so the shell recovers.
         text = data.decode("utf-8", "replace")
         first, _, rest = text.partition("\n")
         if first.strip() == "TIMEOUT":
             partial = (rest.strip() + "\n") if rest.strip() else ""
             return (partial + _timeout_msg(timeout or cmd_timeout(), cmd), None)
+        if first.strip() == "CAPPED":
+            mb = MAX_CAPTURE_BYTES // (1024 * 1024)
+            note = f"[output capped at {mb} MB — the command produced more and was stopped]"
+            body = rest.strip()
+            return ((note + "\n" + body if body else note), None)
         if first.strip().lstrip("-").isdigit():
             return (rest.strip() or "(no output)", int(first))
         # No exit-code line (e.g. an older daemon) — show the whole reply rather

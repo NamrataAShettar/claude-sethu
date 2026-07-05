@@ -106,6 +106,14 @@ with one, either don't make it or update this doc deliberately.
   explicit user action.
 - The runner executes in the user's shell **without** per-command permission
   prompts, so treat the allowlist like shell aliases: keep it tight.
+- **The shell-mode daemon is your own shell — no new privilege.** A per-session `bash`
+  under your uid, reachable only over a **0600** Unix socket (`umask(0o077)` + `chmod`; it
+  refuses to serve if not owner-only — fail closed). Anything that could reach it already
+  runs as you, and it still passes the gate + chain guard. Idles out in 30 min.
+- **Persisted runtime state fails safe on read.** The cwd file holds only a path; `get_cwd`
+  validates it with `os.path.isdir` and falls back on anything torn/garbage/missing.
+  Hardening the *write* (atomic replace, `0600`, `O_NOFOLLOW`) is tracked separately
+  (config/cwd durability) — LOW, shared-machine-specific.
 
 ## Performance
 

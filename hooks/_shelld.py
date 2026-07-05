@@ -12,9 +12,11 @@ is the shell to run when it does (else a clean `bash --norc`).
 
 Protocol: client sends "<command>\\n"; daemon runs it, replies with the captured
 output, closes the connection. On a command timeout the reply is
-"TIMEOUT\\n<partial output>" (the daemon Ctrl-C's the stuck command so the shell
-recovers). The daemon exits after IDLE_TIMEOUT seconds with no connections, and
-on the special command "__SETHU_SHUTDOWN__".
+"TIMEOUT\\n<partial output>": the daemon Ctrl-C's the stuck command and VERIFIES the
+shell recovered, escalating to SIGKILL of the foreground process group if the job
+ignores Ctrl-C; if the shell can't be unstuck it exits so the next command respawns
+a fresh daemon (never serving a command onto a wedged shell). The daemon exits after
+IDLE_TIMEOUT seconds with no connections, and on the command "__SETHU_SHUTDOWN__".
 """
 import os
 import pty
@@ -35,6 +37,11 @@ try:
 except ValueError:
     CMD_TIMEOUT = 20
 
+# Byte ceiling on one command's captured output — mirrors _engine.MAX_CAPTURE_BYTES.
+# A runaway (`yes`, `cat big.iso`) is stopped at the cap so it can't balloon the
+# daemon's (or the client's) RAM.
+MAX_OUTPUT = 8 * 1024 * 1024   # 8 MiB
+
 
 def _perms_ok(mode):
     """True only if the socket's file mode grants no group/world access."""
@@ -54,14 +61,81 @@ def _drain(master, seconds):
             break
 
 
+def _probe(master):
+    """Confirm bash is back at a prompt: ask it to echo a fresh token and see if
+    the token comes back quickly. If bash is still blocked on a stuck foreground
+    job, the printf bytes just queue in the PTY and never run, so this returns
+    False. Also drains everything up to (and just past) the token, so the next
+    command starts with a clean PTY (no bled-over output). Returns True if bash
+    responded — i.e. it recovered."""
+    token = "__SETHU_PROBE_%d__" % time.time_ns()
+    try:
+        os.write(master, ("printf '%%s\\n' %s\n" % token).encode("utf-8"))
+    except OSError:
+        return False
+    end = time.time() + 0.5
+    seen = ""
+    while time.time() < end:
+        r, _, _ = select.select([master], [], [], 0.05)
+        if not r:
+            continue
+        try:
+            chunk = os.read(master, 65536)
+        except OSError:
+            return False
+        if not chunk:
+            return False
+        seen += chunk.decode("utf-8", "replace")
+        if token in seen:
+            _drain(master, 0.2)   # flush any trailing bytes so nothing bleeds
+            return True
+    return False
+
+
+def _recover(master):
+    """Try to unstick the shell after a timeout, and VERIFY it worked, escalating
+    Ctrl-C → SIGKILL the foreground process group. Returns True if bash is back at
+    a clean prompt, False if it's still wedged (caller then respawns the daemon).
+    Never lets the next command run on a still-blocked shell (H3: that caused
+    wedges, output bleed, and late execution of a 'timed-out' command)."""
+    # 1) Ctrl-C the foreground job and check bash recovered.
+    try:
+        os.write(master, b"\x03")
+    except OSError:
+        return False
+    _drain(master, 0.3)
+    if _probe(master):
+        return True
+    # 2) Escalate: SIGKILL the terminal's foreground process group (the stuck job —
+    #    NOT the daemon; the PTY's foreground group is in bash's own session). This
+    #    kills a job that ignores/handles SIGINT (`trap '' INT`, a KeyboardInterrupt
+    #    catcher). SIGKILL can't be trapped.
+    try:
+        pgrp = os.tcgetpgrp(master)
+        if pgrp > 0 and pgrp != os.getpgrp():
+            os.killpg(pgrp, signal.SIGKILL)
+            _drain(master, 0.3)
+            if _probe(master):
+                return True
+    except OSError:
+        pass
+    # 3) Still wedged (the stuck job WAS bash, or it won't die). Unrecoverable.
+    return False
+
+
 def _run(master, cmd):
+    """Run one command in the persistent shell. Returns (response, recovered):
+    recovered is False only when a timed-out command left the shell wedged, in
+    which case the caller kills this daemon so the next command respawns a fresh
+    one (losing shell state on a wedge is acceptable — the alternative is a stuck
+    shell that bleeds output and runs 'timed-out' commands late)."""
     marker = "__SETHU_END_%d__" % time.time_ns()
     os.write(master, (cmd + "\n").encode("utf-8"))
     # Emit the marker followed by the exit code so the client can report status.
     os.write(master, ("printf '\\n%s %%s\\n' \"$?\"\n" % marker).encode("utf-8"))
     buf = ""
     end = time.time() + CMD_TIMEOUT
-    done = False
+    done = capped = False
     while time.time() < end:
         # Short poll interval: select() returns immediately when output is ready,
         # so this only bounds the worst-case slack when a command finishes right
@@ -78,22 +152,28 @@ def _run(master, cmd):
             if marker in buf:
                 done = True
                 break
+            if len(buf) > MAX_OUTPUT:
+                capped = True   # runaway output — stop it, don't balloon RAM (ST7)
+                break
+    if capped:
+        # Interrupt the runaway (like a timeout) so it stops flooding the PTY, then
+        # return the capped partial. recovered=False → the daemon respawns.
+        partial = buf.split(marker, 1)[0][:MAX_OUTPUT].strip()
+        recovered = _recover(master)
+        return "CAPPED\n" + partial, recovered
     if not done:
-        # The command outran the timeout and is still executing (e.g. it's
-        # waiting on input, or long-running). Interrupt it so it doesn't wedge
-        # the persistent shell for the next command, then report a timeout.
-        try:
-            os.write(master, b"\x03")   # Ctrl-C to the running foreground command
-            _drain(master, 0.5)
-        except OSError:
-            pass
+        # The command outran the timeout and is still executing (waiting on input,
+        # long-running, or ignoring Ctrl-C). Interrupt AND verify recovery before
+        # this daemon serves the next command — otherwise the next command's bytes
+        # queue behind the stuck job and run whenever bash unblocks (H3).
         partial = buf.split(marker, 1)[0].strip()
-        return "TIMEOUT\n" + partial
+        recovered = _recover(master)
+        return "TIMEOUT\n" + partial, recovered
     out = buf.split(marker, 1)[0].strip() or "(no output)"
     after = buf.split(marker, 1)[1] if marker in buf else ""
     m = re.search(r"-?\d+", after)
     code = m.group() if m else ""
-    return f"{code}\n{out}"
+    return f"{code}\n{out}", True
 
 
 def main():
@@ -191,7 +271,15 @@ def main():
                 if cmd == "__SETHU_SHUTDOWN__":
                     conn.close()
                     break
-                conn.sendall(_run(master, cmd).encode("utf-8", "replace"))
+                resp, recovered = _run(master, cmd)
+                conn.sendall(resp.encode("utf-8", "replace"))
+                if not recovered:
+                    # A timed-out command left the shell wedged and couldn't be
+                    # killed. Don't serve another command on a stuck bash (it would
+                    # queue behind the dead job) — exit so the next request spawns a
+                    # fresh daemon (the client's connect-refused path handles that).
+                    conn.close()
+                    break
             except Exception:
                 pass
             finally:
