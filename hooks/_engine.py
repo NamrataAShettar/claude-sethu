@@ -6,8 +6,8 @@ hook intercepts it, runs it locally, and blocks the prompt — so it costs zero
 API tokens (the model never sees it). `>>` instead pipes the output into
 Claude's context so it can act on the result.
 
-Safety: read-only is ON by default — inspection commands run, writes/chaining
-are refused. Writing commands run only once added to the allowlist (`--allow`).
+Safety: gated by default — a curated set of safe tools runs, everything else is
+refused until you `--allow` the tool (or `--trust on` for everything).
 `cd` is exempt (it just moves the working directory, runs nothing).
 
 Statefulness has three selectable modes (`sethu --mode <mode>`):
@@ -43,8 +43,11 @@ CMD_TIMEOUT = 20
 MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
-            "readonly": True, "trust": False, "rc": False, "color": True,
+            "trust": False, "rc": False, "color": True,
             "maxLines": MAX_LINES, "timeout": CMD_TIMEOUT}
+# Note: there is no `readonly` key any more. sethu is "gated" by default (only the
+# GATED tool set + your --allow'd tools run); `trust: True` ungates everything. An
+# old config's stale `readonly` key is simply ignored by load_config (not in DEFAULTS).
 MODES = ("stateless", "cwd", "shell")
 
 
@@ -457,6 +460,16 @@ _SAFE_STATE_BUILTINS = {"export", "alias", "unalias", "unset"}
 # builtins — they are NOT auto-run; they need an explicit --allow (see _why_refused).
 _EXEC_BUILTINS = {"source", "."}
 
+# Tools that can run OTHER arbitrary programs. We don't refuse `--allow`-ing them
+# (it's user discretion), but we warn, because allowing one ≈ trust for `<tool> …`.
+_LAUNCHERS = {
+    "sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "env", "command",
+    "xargs", "sudo", "doas", "nice", "nohup", "setsid", "watch", "find", "fd",
+    "git", "make", "cmake", "ssh", "scp", "rsync", "docker", "kubectl", "podman",
+    "python", "python3", "python2", "pypy", "perl", "ruby", "node", "deno", "bun",
+    "php", "lua", "awk", "gawk", "sed", "vim", "nvim", "emacs", "gdb", "lldb",
+}
+
 # A program that switched to the terminal's alternate screen buffer is a
 # full-screen TUI (its captured output is garbled). Catches TUIs not in the
 # INTERACTIVE list, so unknown ones degrade to a helpful hint instead of garbage.
@@ -490,120 +503,48 @@ def is_interactive(cmd):
     return prog in INTERACTIVE
 
 
-# Read-only inspection programs auto-allowed when `readonly` mode is on. Kept
-# conservative on purpose — no sed/awk/xargs/tee (they can write or exec).
-READONLY = {
-    "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "stat", "file",
-    "tree", "which", "type", "date", "whoami", "id", "uname",
-    "hostname", "uptime", "df", "du", "ps", "printenv", "grep", "egrep",
-    "fgrep", "rg", "ag", "cut", "sort", "uniq", "tr", "column", "jq", "yq",
-    "basename", "dirname", "realpath", "readlink", "nl", "tac", "comm", "diff",
-    "cmp", "shasum", "md5", "sha256sum", "cksum", "hexdump", "xxd", "strings",
-    "cal", "look", "fold", "fmt", "rev", "find", "fd", "git",
-}
-# NB: `env` and `command` are intentionally NOT here — they are generic program
-# launchers (`env PROG …` / `command PROG …`) and would make readonly mode into
-# arbitrary code execution. Allowlist them explicitly if you really need them.
-
-# Read-only programs that gain WRITE/EXEC power through specific options. In
-# readonly mode these options are rejected so the mode can't be escaped through a
-# "read-only" program (e.g. `sort -o FILE` writes FILE; `xxd -r` writes binary).
-_RO_WRITE_FLAGS = {
-    "sort": ("-o", "--output"),
-    "xxd": ("-r",),
-    "date": ("-s", "--set"),
-}
-# find primaries that execute a command or write a file — refused in readonly.
-_FIND_WRITE_PRIMARIES = {
-    "-exec", "-execdir", "-ok", "-okdir", "-delete",
-    "-fprint", "-fprint0", "-fprintf", "-fls",
-}
-# Only unambiguously read-only git subcommands. Excluded: branch/tag/remote
-# (delete/create with flags), stash (mutates), config (writes with `key value`).
-# Allowlist those explicitly if you need them.
-READONLY_GIT = {
-    "status", "log", "diff", "show", "describe", "blame", "ls-files",
-    "rev-parse", "shortlog", "rev-list", "cat-file", "reflog",
+# The GATED set: tools that auto-run without --allow when trust is off ("gated"
+# mode, the default). Membership rule (AUDITED, and enforced by TestGatedSetIsFlagSafe):
+# a tool is here ONLY if it's harmless with ANY flags/arguments — no flag or operand
+# can make it write/delete a file or execute another program. So there is deliberately
+# NO per-flag policing; a tool is either flag-safe (here) or it isn't (use --allow to
+# opt into its full surface, at your discretion).
+# Deliberately EXCLUDED because a flag/operand CAN write or exec: git (config/alias
+# exec + writing subcommands), find (-exec/-delete), fd (-x), rg (--pre), sort (-o),
+# uniq / xxd (positional output-file operand), yq (-i), tree (-o), file (-C); and the
+# generic launchers env/command/sed/awk/xargs/tee/sudo. `date`/`hostname` ARE gated,
+# but note their -s / set-name forms mutate SYSTEM state (clock/hostname) and need
+# root — they can't write files or exec, so they pass the flag-safe bar.
+GATED = {
+    "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "stat",
+    "which", "type", "date", "whoami", "id", "uname", "hostname", "uptime",
+    "df", "du", "ps", "printenv", "grep", "egrep", "fgrep", "ag", "cut", "tr",
+    "column", "jq", "basename", "dirname", "realpath", "readlink", "nl", "tac",
+    "comm", "diff", "cmp", "shasum", "md5", "sha256sum", "cksum", "hexdump",
+    "strings", "cal", "look", "fold", "fmt", "rev",
 }
 # Shell metacharacters that enable writes / chaining / substitution / background
 # (newlines included — a multi-line prompt is multiple commands). This is a blunt
-# regex on the whole string: readonly mode is a conservative curated fast-path, so
+# regex on the whole string: gated mode is a conservative curated fast-path, so
 # it deliberately rejects even a quoted `;` (`echo "a;b"`). The allowlist path
 # (`_is_chain_unsafe`) is the quote-aware one — the divergence is intentional.
 _DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
 
 
-# git global options safe to skip before the subcommand: they change output/
-# pathspec handling but do NOT retarget the repo or run code. Deliberately NOT
-# here: -C / --git-dir / --work-tree / --namespace point git at a DIFFERENT repo,
-# whose .git/config git then trusts and can run programs from (core.fsmonitor on
-# status/diff, diff.external/textconv on diff) with no command-line flag. So those
-# (like -c / --config-env / --exec-path) make the command not-read-only; a user who
-# trusts that repo can --allow it.
-_GIT_GLOBAL_NOARG = frozenset({
-    "-p", "--paginate", "--no-pager", "--bare", "--no-replace-objects",
-    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
-    "--icase-pathspecs", "--no-optional-locks",
-})
-
-
-def _git_subcommand(toks):
-    """Resolve git's subcommand, skipping only the leading NO-ARG global options
-    that don't retarget the repo, so `git --no-pager status` is understood as
-    `status`. Returns (sub, safe): `sub` is the subcommand token ('' if none);
-    `safe` is False when ANY other option is seen before the subcommand — repo-
-    retargeting (`-C`, `--git-dir`, …) or exec-capable (`-c key=value`,
-    `--config-env`, `--exec-path`) globals and anything unrecognized can run
-    arbitrary code from config, so the command is never auto-read-only."""
-    i = 1
-    while i < len(toks):
-        t = toks[i]
-        if not t.startswith("-"):
-            return (t, True)                       # the subcommand
-        if t in _GIT_GLOBAL_NOARG:
-            i += 1
-        else:
-            return ("", False)                      # retarget / exec / unknown → not read-only
-    return ("", True)                               # ran out: no subcommand
-
-
-def _flag_present(toks, flags):
-    """True if any token is one of `flags` (also matching `--flag=x` and a
-    combined short flag like `-oFILE`)."""
-    for t in toks[1:]:
-        for f in flags:
-            if t == f or t.startswith(f + "="):
-                return True
-            if len(f) == 2 and f[0] == "-" and t.startswith(f) and len(t) > 2:
-                return True  # combined short flag, e.g. -oFILE
-    return False
-
-
-def is_readonly_safe(cmd):
-    """True only if `cmd` is a pipeline of read-only programs with no
-    redirection, chaining, command substitution, backgrounding, or a write/exec
-    option on an otherwise-read-only program."""
+def is_gated(cmd):
+    """True if `cmd` is a pipeline of GATED tools with no chaining, redirection,
+    command substitution, or backgrounding — i.e. it auto-runs without --allow when
+    trust is off. No flag logic: a tool is gated only if it's harmless with ANY
+    flags (that's the membership rule for GATED), so we just check the program name
+    of each pipe segment. Pipes of gated tools are allowed (`_DANGER` doesn't block
+    `|`); everything else metacharacter-wise is refused."""
     if _DANGER.search(cmd):
         return False
     for seg in cmd.split("|"):
         toks = seg.split()
         if not toks:                      # empty segment ⇒ `||`, trailing `|`, etc.
             return False
-        prog = os.path.basename(toks[0])
-        if prog == "git":
-            sub, safe = _git_subcommand(toks)
-            if not safe or sub not in READONLY_GIT:
-                return False
-            # A read-only subcommand can still write a file (`--output=FILE`) or run
-            # an external program (`--ext-diff` invokes the configured diff.external).
-            if _flag_present(toks, ("--output", "--ext-diff")):
-                return False
-        elif prog == "find":
-            if any(t in _FIND_WRITE_PRIMARIES for t in toks):
-                return False
-        elif prog not in READONLY:
-            return False
-        elif prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
+        if os.path.basename(toks[0]) not in GATED:
             return False
     return True
 
@@ -853,45 +794,24 @@ def _why_refused(cmd, cfg):
     it, so the refusal explains itself to the user instead of hiding the cause.
     Empty when it's just
     'the allowlist is empty' (the generic message covers that)."""
-    if not cfg.get("readonly"):
-        return ""  # allowlist simply empty; nothing special to explain
+    if cfg.get("trust"):
+        return ""  # trust is on, nothing is refused; caller won't reach here anyway
     toks = cmd.split()
     if not toks:
         return ""
     prog = os.path.basename(toks[0])
     if prog in _EXEC_BUILTINS:
         return (f"`{prog}` runs the contents of a file (arbitrary code), so it isn't "
-                f"auto-run. Allow it once with `sethu --allow {prog}`.")
-    if prog == "git":
-        sub, safe = _git_subcommand(toks)
-        if not safe:
-            return ("read-only won't auto-run git with `-c`/`--config-env`/"
-                    "`--exec-path` or a repo-retargeting option (`-C`, `--git-dir`, "
-                    "`--work-tree`), because a repo's own config can run external "
-                    "programs even on `status`/`diff`. Allow the exact command below "
-                    "if you trust it.")
-        if sub and sub not in READONLY_GIT:
-            return (f"`git {sub}` can change the repo, so read-only doesn't run "
-                    f"it automatically (read-only git is status/log/diff/show/blame/…).")
-        if sub in READONLY_GIT and _flag_present(toks, ("--ext-diff",)):
-            return ("`git --ext-diff` runs an external diff program, so read-only "
-                    "mode won't run it automatically. Drop `--ext-diff` to run it "
-                    "read-only, or allow the exact command below.")
-    if prog in _RO_WRITE_FLAGS and _flag_present(toks, _RO_WRITE_FLAGS[prog]):
-        return (f"`{prog}` is read-only, but this flag writes a file, so read-only "
-                f"mode won't run it automatically. Drop the flag to run it read-only "
-                f"(the output just prints, for free), or allow it as-is below.")
-    if prog == "find" and any(t in _FIND_WRITE_PRIMARIES for t in toks):
-        return ("This `find` action writes or runs a command, so read-only "
-                "won't run it automatically.")
+                f"gated. Allow it once with `sethu --allow {prog}`.")
     if _DANGER.search(cmd):
-        return ("For safety, read-only won't run commands joined by `;`, `&&`, "
-                "`&`, or `|`, redirects (`>`), or `$(…)`. Run the parts as separate "
-                "`>` commands, or allow the exact command below.")
-    if prog not in READONLY:
-        return (f"sethu doesn't recognize `{prog}` as a read-only command, so "
-                f"read-only won't run it automatically. See what it does run "
-                f"with `sethu --readonly-list`.")
+        return ("For safety, gated mode won't run commands joined by `;`, `&&`, "
+                "`&`, redirects (`>`), or `$(…)`. Run the parts as separate `>` "
+                "commands, or `--allow` the tool and `--trust on` for the rest.")
+    if prog not in GATED:
+        return (f"`{prog}` isn't in the gated set (it can write or run other programs "
+                f"with some flag, so it's not auto-run). Allow it with "
+                f"`sethu --allow {prog}` — that permits any flags of `{prog}`, your "
+                f"call. `sethu --gated-list` shows what's gated.")
     return ""
 
 
@@ -919,8 +839,8 @@ def process(prompt, data):
         return {"block": _msg(HELP, on)}
 
     mode = cfg.get("mode", "cwd")
-    # readonly wins if a legacy config somehow has both on (safe default).
-    trust_on = cfg.get("trust") and not cfg.get("readonly")
+    # One safety knob: trust off (default) = gated, trust on = everything runs.
+    trust_on = bool(cfg.get("trust"))
     sid = data.get("session_id")
     base = get_cwd(sid, data.get("cwd"))
 
@@ -967,21 +887,18 @@ def process(prompt, data):
                 f"`sethu --mode shell` (add `sethu --rc on` for your aliases/functions).",
                 on)}
 
-    allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or (
-        cfg.get("readonly") and is_readonly_safe(cmd)
-    )
+    allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or is_gated(cmd)
     if not _is_bare_cd(cmd) and not allowed:
         why = _why_refused(cmd, cfg)
         why_line = (why + "\n") if why else ""
-        ro = "" if cfg.get("readonly") else \
-            "  • Auto-allow read-only cmds: sethu --readonly on\n"
+        tool = os.path.basename(prog) if prog else cmd
         return {"block": _reply(mode, trust_on, cmd,
-                f"isn't allowed to run.\n"
+                f"isn't in the gated set, so it doesn't run on its own.\n"
                 f"{why_line}"
-                f"  • Allow it (your call):  sethu --allow \"{cmd}\"\n"
-                f"{ro}"
-                f"  • Open in a terminal:    sethu --launch \"{cmd}\"\n"
-                f"  • See config:            sethu --runner", on)}
+                f"  • Allow this tool:     sethu --allow \"{tool}\"\n"
+                f"  • Open in a terminal:  sethu --launch \"{cmd}\"\n"
+                f"  • Run everything:      sethu --trust on   (footgun)\n"
+                f"  • See what's gated:    sethu --gated-list", on)}
 
     t = cmd_timeout(cfg)
     if mode == "shell":
@@ -1054,12 +971,11 @@ def help_text():
   > cmd      run it, show the output to YOU only. Free (Claude never sees it).
   >> cmd     run it AND send the output to Claude (this costs tokens).
 
-Let a command run (read-only ones like ls / cat / git log run already):
-  sethu --allow "cmd"      permit a command that writes or isn't read-only (undo: --unallow)
+Let a command run (gated tools like ls / cat / grep / jq run already):
+  sethu --allow "tool"     permit a whole tool, any flags (e.g. git, find); undo: --unallow
   sethu --launch "cmd"     interactive (vim/top/ssh) or long-running: opens a terminal (undo: --unlaunch)
-  sethu --readonly off     stop auto-running read-only commands
-  sethu --readonly-list    show which commands run without --allow
-  sethu --trust on         run ANY `>` command, no allowlist (footgun)
+  sethu --gated-list       tools that run without asking (built-in + ones you allowed)
+  sethu --trust on         run ANY `>` command, gate off (footgun)
 
 How commands run:
   sethu --mode {'|'.join(MODES)}   default cwd; shell makes cd/export/venv persist
@@ -1072,11 +988,12 @@ How commands run:
 
   sethu --runner           show the full config with defaults
 
-Read-only by default: inspection runs free, writes need --allow.
-Config: {config_path()}   now: mode={cfg['mode']}, readonly={'on' if cfg.get('readonly') else 'off'}, {len(cfg['allow'])} allowed"""
+Gated by default: a curated set of safe tools runs free; everything else needs
+--allow (per tool) or --trust (everything).
+Config: {config_path()}   now: mode={cfg['mode']}, trust={'on' if cfg.get('trust') else 'off'}, {len(cfg['allow'])} allowed"""
 
 
-SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch", "readonly",
+SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch",
                "trust", "rc", "color", "maxlines", "timeout", "prefix", "restart",
                "runner", "show", "help"}
 
@@ -1108,24 +1025,25 @@ class _Parser(argparse.ArgumentParser):
         sys.exit(2)
 
 
-def readonly_list_text():
-    """On-demand answer to 'what does read-only run without --allow, and why is my
-    command not on it' — the companion to the 'not recognized' refusal. Names are
-    sorted so the output is stable (set iteration order isn't). Kept short: the
-    per-command refusal explains any specific write/exec-flag guard in context, so
-    this doesn't enumerate them all."""
-    # cd (navigation) and the state builtins (export/alias/unalias/unset) aren't in
-    # READONLY but also run without --allow, so list them in sorted order with the
-    # rest rather than as dangling footnotes.
-    extra = {"cd"} | _SAFE_STATE_BUILTINS
-    names = textwrap.fill("  ".join(sorted(READONLY | extra)), width=74,
+def gated_list_text(cfg):
+    """What runs without --allow right now = the built-in GATED tools (any flags)
+    plus cd + the state builtins + whatever YOU'VE allowed. Labels the two groups so
+    it's clear which are defaults vs yours. Names sorted for stable output."""
+    builtin = GATED | {"cd"} | _SAFE_STATE_BUILTINS
+    names = textwrap.fill("  ".join(sorted(builtin)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
+    allowed = [str(x) for x in (cfg.get("allow") or [])]
+    yours = ("\n\nyou allowed (any flags of each):\n"
+             + textwrap.fill("  ".join(sorted(allowed)), width=74,
+                             initial_indent="  ", subsequent_indent="  ")
+             if allowed else "\n\n(you haven't --allow'd any extra tools yet.)")
     return (
-        "these run without asking (no --allow needed):\n\n"
-        f"{names}\n\n"
-        "A write or exec flag still needs --allow (e.g. `sort -o`, `git push`, "
-        "`find -exec`).\n"
-        'For anything else:  sethu --allow "<command>"'
+        "gated: these run without asking (no --allow needed).\n\n"
+        "built-in safe tools (harmless with any flags):\n"
+        f"{names}"
+        f"{yours}\n\n"
+        "Anything else needs `sethu --allow \"<tool>\"` (permits that whole tool), or "
+        "`sethu --trust on` to run everything (footgun)."
     )
 
 
@@ -1145,12 +1063,10 @@ def main(argv=None):
     p.add_argument("--unlaunch", metavar="CMD", help="remove a command from the launch list")
     p.add_argument("--mode", choices=MODES, help="set statefulness mode")
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
-    p.add_argument("--readonly", choices=["on", "off"],
-                   help="auto-allow a curated set of read-only commands")
-    p.add_argument("--readonly-list", action="store_true", dest="readonly_list",
-                   help="list the commands read-only runs without --allow")
+    p.add_argument("--gated-list", action="store_true", dest="gated_list",
+                   help="list the tools that run without asking: built-in defaults + ones you've --allow'd")
     p.add_argument("--trust", choices=["on", "off"],
-                   help="bypass the allowlist — run ANY command (footgun)")
+                   help="off (default) = gated; on = run ANY command, gate off (footgun)")
     p.add_argument("--rc", choices=["on", "off"],
                    help="in shell mode, source your shell rc (aliases/functions/env)")
     p.add_argument("--color", choices=["on", "off"],
@@ -1164,8 +1080,8 @@ def main(argv=None):
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
     a = p.parse_args(args_list)
 
-    if a.readonly_list:
-        print(readonly_list_text())
+    if a.gated_list:
+        print(gated_list_text(load_config()))
         return
     if a.restart:
         print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
@@ -1195,6 +1111,11 @@ def main(argv=None):
         else:
             cfg["allow"].append(val)
             print(f"✔ added to allow: {val!r}"); changed = True
+            tool = os.path.basename(val.split()[0]) if val.split() else ""
+            if tool in _LAUNCHERS:
+                print(f"  ⚠ `{tool}` can run other programs, so allowing it lets "
+                      f"`{tool} …` run anything — closer to trust than a single tool. "
+                      f"Your call; `sethu --unallow {tool}` to undo.")
     if a.launch is not None:
         val = " ".join(a.launch.split())
         if not val:
@@ -1257,25 +1178,13 @@ def main(argv=None):
             if cfg["timeout"] > 28 else ""
         print(f"✔ timeout: {cfg['timeout']}s{note}{warn}")
         changed = True
-    if a.readonly:
-        cfg["readonly"] = (a.readonly == "on")
-        note = ""
-        if cfg["readonly"] and cfg.get("trust"):
-            cfg["trust"] = False          # mutually exclusive with trust
-            note = " (trust turned OFF)"
-        print(f"✔ readonly: {a.readonly}{note}")
-        changed = True
     if a.trust:
         cfg["trust"] = (a.trust == "on")
         if cfg["trust"]:
-            ro = ""
-            if cfg.get("readonly"):
-                cfg["readonly"] = False   # mutually exclusive with readonly
-                ro = " (readonly turned OFF.)"
-            print("⚠ trust ON — the allowlist is bypassed; ANY `>` command will run, "
-                  f"with no permission prompt.{ro} Turn it off with `sethu --trust off`.")
+            print("⚠ trust ON — the gate is off; ANY `>` command will run, with no "
+                  "permission prompt. Turn it back on with `sethu --trust off`.")
         else:
-            print("✔ trust: off (allowlist enforced again)")
+            print("✔ trust: off — gated again (only safe tools + your --allow'd run).")
         changed = True
     if changed:
         save_config(cfg)
@@ -1287,24 +1196,17 @@ def main(argv=None):
 
 def _print_config(cfg):
     """Pretty-print the effective config (the `sethu` / `--runner` view)."""
-    both = cfg.get("readonly") and cfg.get("trust")
-    trust_disp = "off"
-    if cfg.get("trust"):
-        trust_disp = "set but OVERRIDDEN by readonly ⚠" if both else "ON ⚠ allowlist bypassed"
+    trust_disp = "ON ⚠ gate off — everything runs" if cfg.get("trust") else "off (gated)"
     ml = max_lines(cfg)
     print(f"sethu config ({config_path()}):")
     print(f"  prefix:   {cfg['prefix']!r}   (default '>'; > run+block free, >> send to Claude)")
     print(f"  mode:     {cfg['mode']}   (default cwd; one of: {', '.join(MODES)})")
-    print(f"  readonly: {'on' if cfg.get('readonly') else 'off'}   (default on; auto-allow read-only cmds)")
-    print(f"  trust:    {trust_disp}   (default off)")
+    print(f"  trust:    {trust_disp}   (default off; off = gated safe tools + your --allow'd)")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (default off; shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (default on; colored result header)")
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (default 40; truncate long output, full saved to a file)")
     print(f"  timeout:  {cmd_timeout(cfg)}s   (default 20s; max seconds a command may run)")
-    if both:
-        print("  ⚠ both readonly and trust are set (legacy) — readonly wins. "
-              "Run `sethu --readonly on` or `sethu --trust off` to clean up.")
-    print(f"  allow:    {cfg['allow']}")
+    print(f"  allow:    {cfg['allow']}   (gated tools + these run; `--gated-list` to see all)")
     print(f"  launch:   {cfg['launch']}")
 
 

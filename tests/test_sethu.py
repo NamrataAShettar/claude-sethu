@@ -21,9 +21,8 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   truthful add/remove + empty/multispace TestManagementCLI                     [x]
   --mode stateless/cwd/shell             TestModeSwitching, TestCwdMode,        [x]
                                          TestShellMode
-  --readonly on/off                      TestReadonlyFn, TestSafety,            [x]
-                                         TestConfig, TestTrust
-  --trust on/off                         TestTrust                              [x]
+  gated model (tool set, no flag logic)  TestGatedFn, TestSafety, TestConfig    [x]
+  --trust on/off (one safety knob)       TestTrust                              [x]
   --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
   state builtins auto-run; source gated  TestStateBuiltinHint                   [x]
   --color on/off                         TestColor, TestConfig                  [x]
@@ -39,10 +38,10 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   interactive guard (REPL/version/help)  TestInteractiveFn, TestSafety,         [x]
                                          TestRefusalMessages
   full-screen TUIs (claude/…) + hint     TestFullScreenTUI                      [x]
-  readonly safety (injection / chain)    TestReadonlyFn, TestSafety             [x]
-  git globals / exec-c / --ext-diff      TestReadonlyFn                         [x]
+  gated safety (injection / chain)       TestGatedFn, TestSafety                [x]
+  --allow whole-tool + launcher warning  TestManagementCLI, TestGatedFn         [x]
   bare-cd guard (chain not exempt)       TestSafety, TestShellMode              [x]
-  --readonly-list + honest refusal       TestManagementCLI, TestReadonlyFn      [x]
+  --gated-list (built-in + yours)        TestManagementCLI                      [x]
   every response opens with |^=^| ·       TestEveryResponseLeadsWithIcon         [x]
   refusal messages explain why           TestRefusalMessages                    [x]
   timeout message cites hook budget      TestRefusalMessages                    [x]
@@ -88,7 +87,7 @@ class Base(unittest.TestCase):
         os.environ.pop("SETHU_CONFIG", None)
 
     def write(self, **kw):
-        c = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [], "readonly": False}
+        c = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [], "trust": False}
         c.update(kw)
         with open(self.cfg, "w") as f:
             json.dump(c, f)
@@ -107,89 +106,60 @@ class Base(unittest.TestCase):
             pass
 
 
-class TestReadonlyFn(unittest.TestCase):
-    def test_safe(self):
-        for c in ["ls", "ls -la", "cat f | head", "git log --oneline", "pwd",
-                  "grep -n x f | head -5", "find . -name x"]:
-            self.assertTrue(_engine.is_readonly_safe(c), c)
+class TestGatedFn(unittest.TestCase):
+    """The gated model: a tool auto-runs (trust off) iff its program is in GATED and
+    the command has no chaining/redirection/substitution. NO flag logic — a tool is
+    gated only if it's harmless with any flags, so git/find/fd/sort/etc are NOT gated
+    (they need --allow), and a gated tool runs with ANY flags."""
+    def test_gated(self):
+        # gated tools, with any flags, and pipes of gated tools.
+        for c in ["ls", "ls -la", "cat f | head", "pwd", "grep -n x f | head -5",
+                  "date", "jq . x.json", "wc -l f"]:
+            self.assertTrue(_engine.is_gated(c), c)
 
-    def test_unsafe(self):
+    def test_not_gated_tools_need_allow(self):
+        # tools that can write/exec via a flag/operand aren't gated (any invocation).
+        for c in ["git log", "git push", "find . -name x", "find . -delete",
+                  "fd foo", "rg pat", "sort f", "sort -o out f", "xxd f", "yq . x",
+                  "npm test", "bat f", "sed -n p f", "awk '{}' f"]:
+            self.assertFalse(_engine.is_gated(c), c)
+
+    def test_chaining_never_gated(self):
+        # the chain guard: no gated command may chain/redirect/substitute.
         for c in ["ls; rm -rf ~", "ls && rm", "ls || rm", "echo x > f", "cat f >> g",
-                  "cat f | sh", "git push", "git reset --hard", "find . -delete",
-                  "$(rm)", "ls `rm`", "ls & rm", "sed -i s/a/b/ f", "awk '{}' f"]:
-            self.assertFalse(_engine.is_readonly_safe(c), c)
+                  "cat f | sh", "$(rm)", "ls `rm`", "ls & rm", "cat <(rm)"]:
+            self.assertFalse(_engine.is_gated(c), c)
 
     def test_no_exec_wrappers(self):
-        # env / command are generic launchers — must NOT be readonly-safe.
-        for c in ["env rm -rf x", "env FOO=1 sh -c id", "command rm -rf x",
-                  "command id"]:
-            self.assertFalse(_engine.is_readonly_safe(c), c)
+        # env / command are generic launchers — never gated.
+        for c in ["env rm -rf x", "env FOO=1 sh -c id", "command rm -rf x"]:
+            self.assertFalse(_engine.is_gated(c), c)
 
-    def test_no_write_flags(self):
-        # Read-only programs that can write a file via an option are refused.
-        for c in ["sort -o /tmp/v f", "sort --output=/tmp/v f", "sort -o/tmp/v f",
-                  "xxd -r hex out", "date -s 2020-01-01",
-                  "git diff --output=/tmp/v", "git log --output=/tmp/v",
-                  "git show --output=/tmp/v HEAD",
-                  "find . -fls out", "find . -fprint0 out", "find . -okdir rm {} ;"]:
-            self.assertFalse(_engine.is_readonly_safe(c), c)
+    def test_why_refused_not_gated(self):
+        # A non-gated tool's refusal names it and points at `--allow <tool>`.
+        msg = _engine._why_refused("npm test", {})
+        self.assertIn("npm", msg)
+        self.assertIn("gated set", msg)
+        self.assertIn("--allow npm", msg)
 
-    def test_write_flag_guard_no_overblock(self):
-        # …but legit read-only invocations of the same programs still pass.
-        for c in ["sort f", "sort -r f", "sort -n f", "xxd f", "date",
-                  "git diff", "git show HEAD", "find . -follow", "find . -name x"]:
-            self.assertTrue(_engine.is_readonly_safe(c), c)
+    def test_why_refused_source_is_gated_exception(self):
+        # source/. execute a file → not gated even though they're builtins.
+        msg = _engine._why_refused("source venv/bin/activate", {})
+        self.assertIn("contents of a file", msg)
+        self.assertIn("--allow source", msg)
 
-    def test_git_global_options_readonly(self):
-        # M2: a read-only git subcommand stays read-only behind leading NON-
-        # retargeting globals (output/pathspec handling only).
-        for c in ["git --no-pager log", "git -p diff", "git --paginate show HEAD",
-                  "git --literal-pathspecs ls-files",
-                  "git --no-optional-locks --no-pager status"]:
-            self.assertTrue(_engine.is_readonly_safe(c), c)
-
-    def test_git_global_options_still_refuse_writes(self):
-        # M2: globals must not smuggle a write subcommand past the gate…
-        for c in ["git --no-pager reset --hard", "git -p push"]:
-            self.assertFalse(_engine.is_readonly_safe(c), c)
-
-    def test_git_exec_globals_refused(self):
-        # M2/security: options that run code from config — retargeting (-C,
-        # --git-dir: a foreign repo's config execs on status/diff) or exec-capable
-        # (-c/--config-env/--exec-path) — are never auto-read-only, even in front
-        # of a read-only subcommand.
-        for c in ["git -c core.pager=evil log", "git -c alias.x='!sh' status",
-                  "git --exec-path=/evil status", "git --config-env=core.pager=X log",
-                  "git -C /tmp status", "git --git-dir=/r/.git log",
-                  "git --work-tree=/r status", "git -C hostile diff"]:
-            self.assertFalse(_engine.is_readonly_safe(c), c)
-
-    def test_git_ext_diff_refused(self):
-        # L1 (shipped with M2): --ext-diff runs the configured external diff program.
-        for c in ["git log --ext-diff", "git show --ext-diff HEAD",
-                  "git -C /tmp diff --ext-diff"]:
-            self.assertFalse(_engine.is_readonly_safe(c), c)
-
-    def test_why_refused_git_globals(self):
-        # M2: refusal reasons stay accurate through leading globals.
-        cfg = {"readonly": True}
-        self.assertIn("push", _engine._why_refused("git --no-pager push", cfg))
-        # exec-capable and repo-retargeting globals share the "config can run
-        # programs" explanation.
-        for c in ("git -c core.pager=x log", "git -C /tmp status"):
-            self.assertIn("config can run", _engine._why_refused(c, cfg), c)
-        self.assertIn("--ext-diff",
-                      _engine._why_refused("git log --ext-diff", cfg))
-
-    def test_why_refused_unknown_is_honest(self):
-        # An unrecognized command is genuinely read-only but not in our set — the
-        # refusal must say "doesn't recognize", not the false "isn't a read-only
-        # command", and point to the list.
-        msg = _engine._why_refused("bat file.txt", {"readonly": True})
-        self.assertIn("doesn't recognize", msg)
-        self.assertIn("bat", msg)
-        self.assertIn("--readonly-list", msg)
-        self.assertNotIn("isn't a read-only command", msg)
+    def test_gated_set_excludes_write_exec_capable_tools(self):
+        # INVARIANT (from the flag-safety audit): no tool that can write/delete a
+        # file or execute another program via SOME flag/operand may be in GATED —
+        # that's the whole point of dropping flag policing. If you add one of these
+        # to GATED, this fails: put it behind --allow instead.
+        forbidden = {
+            "git", "find", "fd", "rg", "sort", "uniq", "xxd", "yq", "tree", "file",
+            "env", "command", "sed", "awk", "gawk", "xargs", "tee", "sudo", "sh",
+            "bash", "python", "python3", "perl", "node", "less", "vi", "vim",
+        }
+        leaked = forbidden & _engine.GATED
+        self.assertEqual(leaked, set(), f"write/exec-capable tools leaked into GATED: {leaked}")
 
 
 class TestHookGate(Base):
@@ -298,12 +268,12 @@ class TestInteractiveFn(unittest.TestCase):
 class TestSafety(Base):
     def test_not_allowed_refused(self):
         r = self.proc("> rm -rf /tmp/x")
-        self.assertIn("isn't allowed", r["block"])
+        self.assertIn("gated set", r["block"])
 
     def test_readonly_blocks_dangerous(self):
-        self.write(readonly=True)
+        self.write()
         for c in ["ls; rm -rf ~", "echo x > /tmp/f", "cat README | sh", "git push"]:
-            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+            self.assertIn("gated set", self.proc("> " + c)["block"], c)
 
     def test_interactive_allowlisted_is_refused(self):
         self.write(allow=["vi"])
@@ -319,22 +289,22 @@ class TestSafety(Base):
 
     def test_chained_cd_refused_not_exempt(self):
         # H4: a chained cd must hit the normal gate (refused), not the cd exemption.
-        self.write(readonly=True)
-        self.assertIn("isn't allowed", self.proc("> cd /tmp; rm -rf ~")["block"])
+        self.write()
+        self.assertIn("gated set", self.proc("> cd /tmp; rm -rf ~")["block"])
 
     def test_allowlist_no_pipe_injection(self):
         # Allowing `ls` must NOT permit `ls | rm -rf x` (the reported bug).
         self.write(allow=["ls"])
-        self.assertIn("isn't allowed", self.proc("> ls | grep x | rm -rf x")["block"])
-        self.assertIn("isn't allowed", self.proc("> ls; rm -rf x")["block"])
-        self.assertIn("isn't allowed", self.proc("> ls && rm -rf x")["block"])
-        self.assertIn("isn't allowed", self.proc("> ls $(rm)")["block"])
+        self.assertIn("gated set", self.proc("> ls | grep x | rm -rf x")["block"])
+        self.assertIn("gated set", self.proc("> ls; rm -rf x")["block"])
+        self.assertIn("gated set", self.proc("> ls && rm -rf x")["block"])
+        self.assertIn("gated set", self.proc("> ls $(rm)")["block"])
         # but plain args are still fine
-        self.assertNotIn("isn't allowed", self.proc("> ls -la")["block"])
+        self.assertNotIn("gated set", self.proc("> ls -la")["block"])
 
     def test_allowlist_no_newline_injection(self):
         self.write(allow=["ls"])
-        self.assertIn("isn't allowed", self.proc("> ls\nrm -rf x")["block"])
+        self.assertIn("gated set", self.proc("> ls\nrm -rf x")["block"])
 
     def test_quoted_metachars_are_allowed(self):
         # A `;`/`|` INSIDE quotes is argument text, not a command chain, so an
@@ -343,7 +313,7 @@ class TestSafety(Base):
         for c in ['python3 -c "import os; print(os.getpid())"',
                   "python3 -c 'a; b; c'",
                   'echo "a|b;c"']:
-            self.assertNotIn("isn't allowed", self.proc("> " + c)["block"], c)
+            self.assertNotIn("gated set", self.proc("> " + c)["block"], c)
 
     def test_unquoted_ops_still_refused_with_interpreter(self):
         # But a real unquoted chain after the interpreter is still refused.
@@ -352,23 +322,24 @@ class TestSafety(Base):
                   "python3 -c \"print(1)\" | sh",
                   'python3 script.py > /etc/passwd',
                   'python3 -c "print(1)" && rm x']:
-            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+            self.assertIn("gated set", self.proc("> " + c)["block"], c)
 
     def test_command_substitution_refused_even_quoted(self):
-        # $( ), ${ }, backticks expand even inside double quotes → always refused.
+        # $( ) and backticks EXECUTE even inside quotes → always refused, even for a
+        # gated/allowed tool. (Plain ${VAR} parameter expansion is harmless and runs.)
         self.write(allow=["echo"])
-        for c in ['echo "$(rm -rf x)"', 'echo "${HOME}"', 'echo "`rm`"']:
-            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+        for c in ['echo "$(rm -rf x)"', 'echo "`rm`"']:
+            self.assertIn("gated set", self.proc("> " + c)["block"], c)
 
     def test_readonly_no_newline_injection(self):
-        self.write(readonly=True)
-        self.assertIn("isn't allowed", self.proc("> ls\nrm -rf x")["block"])
+        self.write()
+        self.assertIn("gated set", self.proc("> ls\nrm -rf x")["block"])
 
     def test_readonly_git_writes_refused(self):
-        self.write(readonly=True)
+        self.write()
         for c in ["git config user.name hacked", "git stash", "git branch -D main",
                   "git tag -d v1", "git remote add evil url"]:
-            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+            self.assertIn("gated set", self.proc("> " + c)["block"], c)
 
 
 class TestManagementCLI(Base):
@@ -385,7 +356,7 @@ class TestManagementCLI(Base):
     def test_bare_prints_help_menu(self):
         out = self._out([])
         for t in ["sethu:", "> cmd", ">> cmd", "--allow", "--launch", "--runner",
-                  "Read-only by default"]:
+                  "Gated by default"]:
             self.assertIn(t, out, t)
 
     def test_runner_and_show_print_config(self):
@@ -443,15 +414,27 @@ class TestManagementCLI(Base):
             self.assertIn("nothing to", out, flag)
             self.assertNotIn("sethu config", out, flag)  # not the --runner view
 
-    def test_readonly_list_prints_set_and_guards(self):
-        out = self._out(["--readonly-list"])
-        for t in ["ls", "git", "jq",                       # curated names shown
-                  "cd",                                    # always-exempt builtin shown
-                  "write or exec flag still needs --allow", # the flag-guard note
-                  'sethu --allow "<command>"']:            # the escape hatch
+    def test_allow_launcher_warns(self):
+        # --allow'ing a launcher (git/sh/env/…) ≈ trust for that tool, so warn — but
+        # still allow it (user discretion). A non-launcher tool gets no warning.
+        self.write(allow=[])
+        for tool in ("git", "sh", "python3", "xargs"):
+            out = self._out(["--allow", tool])
+            self.assertIn("✔ added", out)
+            self.assertIn("run other programs", out, tool)
+        self.write(allow=[])
+        self.assertNotIn("run other programs", self._out(["--allow", "npm test"]))
+
+    def test_gated_list_shows_builtin_and_yours(self):
+        self.write(allow=["git", "npm test"])
+        out = self._out(["--gated-list"])
+        for t in ["ls", "jq", "cd",                        # built-in gated names
+                  "you allowed", "git", "npm test",        # your allowed tools, labeled
+                  "--trust on"]:                           # the trust pointer
             self.assertIn(t, out, t)
+        self.assertNotIn("git", out.split("you allowed")[0])  # git is NOT a built-in
         # Sorted → stable output (set iteration order is not).
-        self.assertEqual(out, self._out(["--readonly-list"]))
+        self.assertEqual(out, self._out(["--gated-list"]))
 
     def test_bad_arg_error_is_branded(self):
         # A bad flag gives a branded, concise error (icon + 'error:' + menu
@@ -472,18 +455,18 @@ class TestHeaderFormat(Base):
     separator regression fails here instead of by eye. Catches the class of bug
     where a part (e.g. ⚠trust) wasn't `·`-separated."""
     def test_run_header(self):
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         h = self.proc("> ls")["block"].split("\n")[0]
         self.assertEqual(h, "|^=^| · [cwd] · ✓ exit 0 · $ ls")
 
     def test_refusal_header_omits_status(self):
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         h = self.proc("> git branch")["block"].split("\n")[0]
         self.assertEqual(h, "|^=^| · [cwd] · $ git branch")
 
     def test_trust_segment_is_dot_separated(self):
         # regression: ⚠trust used to be space-glued to the [mode] tag.
-        self.write(mode="shell", trust=True, readonly=False, color=False)
+        self.write(mode="shell", trust=True, color=False)
         h = self.proc("> claude")["block"].split("\n")[0]  # interactive refusal
         self.assertEqual(h, "|^=^| · [shell] · ⚠trust · $ claude")
 
@@ -491,13 +474,13 @@ class TestHeaderFormat(Base):
 class TestFullScreenTUI(Base):
     def test_known_tui_refused_as_interactive(self):
         # claude / lazygit / etc. are in the interactive list -> upfront --launch.
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         self.assertIn("interactive", self.proc("> claude --plugin-dir ~/x")["block"])
 
     def test_unknown_tui_alt_screen_gets_hint(self):
         # A TUI captured mid-draw emits the alt-screen escape AND fails/times out;
         # sethu detects the escape (on a non-clean exit) and points at --launch.
-        self.write(mode="stateless", trust=True, readonly=False, color=False)
+        self.write(mode="stateless", trust=True, color=False)
         b = self.proc(r"> printf '\033[?1049hUI'; false")["block"]  # escape, exit 1
         self.assertIn("full-screen program", b)
         self.assertIn("--launch", b)
@@ -505,18 +488,18 @@ class TestFullScreenTUI(Base):
     def test_alt_screen_on_clean_exit_no_hint(self):
         # A command that legitimately prints those bytes and exits 0 must NOT trip
         # the hint (false-positive guard).
-        self.write(mode="stateless", trust=True, readonly=False, color=False)
+        self.write(mode="stateless", trust=True, color=False)
         self.assertNotIn("full-screen program",
                          self.proc(r"> printf '\033[?1049hUI'")["block"])
 
     def test_plain_output_gets_no_hint(self):
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         self.assertNotIn("full-screen program", self.proc("> ls")["block"])
 
     def test_command_ansi_is_reset_to_prevent_bleed(self):
         # A command that leaves a colour/attribute open gets a trailing reset so it
         # doesn't bleed into the rest of the transcript. Plain output doesn't.
-        self.write(trust=True, readonly=False, color=False)
+        self.write(trust=True, color=False)
         self.assertTrue(self.proc(r"> printf '\033[33mopen'")["block"].endswith("\x1b[0m"))
         self.assertFalse(self.proc("> printf plain")["block"].endswith("\x1b[0m"))
 
@@ -524,7 +507,7 @@ class TestFullScreenTUI(Base):
 class TestRefusalMessages(Base):
     def test_interactive_leads_with_launch_not_allow(self):
         # Interactive commands point to --launch (allowlisting can't make them run).
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         for c in ["vim", "python3", "top"]:
             b = self.proc("> " + c)["block"]
             self.assertIn("--launch", b, c)
@@ -532,12 +515,12 @@ class TestRefusalMessages(Base):
             self.assertNotIn('sethu --allow', b, c)   # allow is futile here
 
     def test_refusal_explains_why_and_still_offers_allow(self):
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         cases = {
-            "git branch": "change the repo",
-            "sort -o out f": "writes a file",
-            "npm test": "doesn't recognize `npm`",
-            "ls; rm -rf ~": "joined by",
+            "git log": "gated set",       # git isn't gated (can exec/write)
+            "sort -o out f": "gated set", # sort isn't gated
+            "npm test": "gated set",      # npm isn't gated
+            "ls; rm -rf ~": "joined by",  # chaining refused
         }
         for cmd, why in cases.items():
             b = self.proc("> " + cmd)["block"]
@@ -550,7 +533,7 @@ class TestRefusalMessages(Base):
     def test_refusal_has_unified_header_without_status(self):
         # Every response shares the header format; a refusal echoes the command but
         # omits the exit-status slot (it never ran), so it can't be mislabelled.
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         first = self.proc("> git branch")["block"].split("\n")[0]
         self.assertIn("[cwd]", first)          # mode tag
         self.assertIn("$ git branch", first)   # command echoed in the header
@@ -558,18 +541,19 @@ class TestRefusalMessages(Base):
         # a real run DOES show a status
         self.assertIn("exit 0", self.proc("> ls")["block"].split("\n")[0])
 
-    def test_refusal_offers_safer_path_when_one_exists(self):
-        # Where a read-only way exists, the message points to it (not only --allow).
-        self.write(readonly=True, color=False)
-        self.assertIn("Drop the flag", self.proc("> sort -o out f")["block"])
+    def test_refusal_offers_actionable_next_step(self):
+        # A chain points to running parts separately; a non-gated tool points to
+        # allowing that tool.
+        self.write(color=False)
         self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
+        self.assertIn("--allow npm", self.proc("> npm test")["block"])
 
 
 class TestTrust(Base):
     def test_trust_bypasses_allowlist(self):
         self.write(trust=True)  # nothing allowlisted
         r = self.proc("> echo trusted")
-        self.assertNotIn("isn't allowed", r["block"])
+        self.assertNotIn("gated set", r["block"])
         self.assertIn("trusted", r["block"])
 
     def test_trust_marker_in_header(self):
@@ -580,26 +564,19 @@ class TestTrust(Base):
         self.write(trust=True)
         self.assertIn("interactive", self.proc("> vim x")["block"])
 
-    def test_readonly_clears_trust(self):
-        self.write(trust=True)
-        _engine.main(["--readonly", "on"])
-        cfg = _engine.load_config()
-        self.assertTrue(cfg["readonly"])
-        self.assertFalse(cfg["trust"])
-
-    def test_trust_clears_readonly(self):
-        self.write(readonly=True)
+    def test_trust_roundtrips(self):
+        # One knob: --trust on/off is the whole safety axis (gated = trust off).
+        self.write()
         _engine.main(["--trust", "on"])
-        cfg = _engine.load_config()
-        self.assertTrue(cfg["trust"])
-        self.assertFalse(cfg["readonly"])
+        self.assertTrue(_engine.load_config()["trust"])
+        _engine.main(["--trust", "off"])
+        self.assertFalse(_engine.load_config()["trust"])
 
-    def test_readonly_wins_when_both_set(self):
-        # Legacy config with both on → readonly behavior (a write is refused).
-        self.write(readonly=True, trust=True)
-        r = self.proc("> mkdir nope")
-        self.assertIn("isn't allowed", r["block"])
-        self.assertNotIn("trust", r["block"])
+    def test_trust_on_runs_non_gated(self):
+        # With trust on, a non-gated tool runs (no refusal) — the gate is off.
+        self.write(trust=True, allow=[])
+        r = self.proc("> mkdir /tmp/sethu-trust-test")["block"]
+        self.assertNotIn("gated set", r)
 
 
 class TestRunner(Base):
@@ -611,7 +588,7 @@ class TestRunner(Base):
         with open(script, "w") as f:
             f.write("print('hi from script')")
         r = self.proc("> python3 " + script)["block"]
-        self.assertNotIn("isn't allowed", r)
+        self.assertNotIn("gated set", r)
         self.assertNotIn("interactive", r)
         self.assertIn("hi from script", r)
 
@@ -622,16 +599,16 @@ class TestRunner(Base):
     def test_explicit_allow_runs(self):
         self.write(allow=["echo"])
         r = self.proc("> echo hello")
-        self.assertNotIn("isn't allowed", r["block"])
+        self.assertNotIn("gated set", r["block"])
         self.assertIn("hello", r["block"])
 
     def test_readonly_allows_inspection(self):
-        self.write(readonly=True)
+        self.write()
         r = self.proc("> ls")
-        self.assertNotIn("isn't allowed", r["block"])
+        self.assertNotIn("gated set", r["block"])
 
     def test_completion_header(self):
-        self.write(readonly=True)
+        self.write()
         r = self.proc("> ls")
         self.assertIn("[cwd]", r["block"])
         self.assertIn("exit 0", r["block"])
@@ -675,7 +652,7 @@ class TestRunner(Base):
         self.assertIn("opened", r)
 
     def test_cd_to_bad_dir_message(self):
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         self.assertIn("not a directory",
                       self.proc("> cd /no_such_dir_xyz123")["block"])
 
@@ -689,18 +666,18 @@ class TestIcon(Base):
 
     def test_separator_between_icon_and_tag(self):
         # A dim `·` splits the icon from the [mode] tag so they don't blend (UX7).
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         self.assertIn(_engine.ICON + " · [cwd]", self.proc("> ls")["block"])
 
 
 class TestColor(Base):
     def test_header_colored_by_default(self):
         os.environ.pop("NO_COLOR", None)
-        self.write(readonly=True)
+        self.write()
         self.assertIn("\033[", self.proc("> ls")["block"])  # ANSI present
 
     def test_color_off_strips_ansi(self):
-        self.write(readonly=True, color=False)
+        self.write(color=False)
         self.assertNotIn("\033[", self.proc("> ls")["block"])
 
     def test_failure_is_red(self):
@@ -716,7 +693,7 @@ class TestColor(Base):
         self.assertNotIn("38;5;203", self.proc("> true")["block"])
 
     def test_no_color_env_disables(self):
-        self.write(readonly=True)
+        self.write()
         os.environ["NO_COLOR"] = "1"
         try:
             self.assertNotIn("\033[", self.proc("> ls")["block"])
@@ -807,7 +784,7 @@ class TestSweep(unittest.TestCase):
 
 class TestLeadingWhitespace(Base):
     def test_space_before_prefix_still_intercepts(self):
-        self.write(readonly=True)
+        self.write()
         r = self.proc("   > pwd")            # stray leading spaces
         self.assertNotIn("passthrough", r)   # handled, not leaked to the model
         self.assertIn("pwd", r["block"])
@@ -818,7 +795,7 @@ class TestLeadingWhitespace(Base):
     def test_prefix_mid_prompt_does_not_trigger(self):
         # `>` only triggers at the START of a prompt — never mid-text, so prompts
         # that merely mention `>` are not intercepted.
-        self.write(readonly=True)
+        self.write()
         for p in ["compare a > b in the code", "if x > 0 then run it",
                   "note a>b matters", "use foo > bar as an example"]:
             self.assertEqual(self.proc(p), {"passthrough": True}, p)
@@ -827,7 +804,7 @@ class TestLeadingWhitespace(Base):
 
 class TestCwdMode(Base):
     def test_cd_persists(self):
-        self.write(readonly=True)
+        self.write()
         self.proc("> cd /tmp")
         r = self.proc("> pwd")
         self.assertIn("tmp", r["block"])
@@ -840,7 +817,7 @@ class TestCwdMode(Base):
 class TestModeSwitching(Base):
     def test_switch_cwd_to_stateless_changes_cd_behavior(self):
         sid = "ms-cwd"
-        self.write(mode="cwd", readonly=True, color=False)
+        self.write(mode="cwd", color=False)
         self.proc("> cd /tmp", sid=sid)
         self.assertIn("tmp", self.proc("> pwd", sid=sid)["block"])   # cwd persists
         _engine.main(["--mode", "stateless"])                        # switch
@@ -908,11 +885,11 @@ class TestShellMode(Base):
         import time
         sid = "test-shell-cdchain"
         self.addCleanup(self._shutdown, sid)
-        self.write(mode="shell", readonly=True)
+        self.write(mode="shell")
         sentinel = os.path.join(self.tmp, "H4_PWNED")
         r = self.proc(f"> cd /tmp; touch {sentinel}", sid=sid)
         self.assertIn("block", r)                 # refused…
-        self.assertIn("isn't allowed", r["block"])
+        self.assertIn("gated set", r["block"])
         time.sleep(0.3)                           # give any (buggy) execution a chance
         self.assertFalse(os.path.exists(sentinel), "chained cd executed in shell mode!")
 
@@ -939,7 +916,7 @@ class TestStateBuiltinHint(Base):
         # UX1/UX4: export/alias/unset auto-run without --allow, but only persist in
         # shell mode; cwd/stateless say so (a no-op note) instead of running nothing.
         for m in ("cwd", "stateless"):
-            self.write(mode=m, readonly=True, color=False)
+            self.write(mode=m, color=False)
             for c in ["export FOO=1", "alias g=git", "unalias g", "unset PATHX"]:
                 b = self.proc("> " + c)["block"]
                 self.assertIn("shell mode", b, f"{m}: {c}")
@@ -949,7 +926,7 @@ class TestStateBuiltinHint(Base):
         # UX1: in shell mode they auto-run WITHOUT --allow and persist.
         sid = "test-ux1-persist"
         self.addCleanup(self._shutdown, sid)
-        self.write(mode="shell", readonly=True, allow=[], color=False)  # no --allow
+        self.write(mode="shell", allow=[], color=False)  # no --allow
         self.proc("> export FOO=ux1", sid=sid)
         self.assertIn("ux1", self.proc("> echo $FOO", sid=sid)["block"])
 
@@ -958,7 +935,7 @@ class TestStateBuiltinHint(Base):
         # auto-permitted — they need --allow, with a message that says why (in every
         # mode, since the risk isn't mode-dependent).
         for m in ("cwd", "shell"):
-            self.write(mode=m, readonly=True, color=False)
+            self.write(mode=m, color=False)
             for c in ["source venv/bin/activate", ". env/bin/activate"]:
                 b = self.proc("> " + c)["block"]
                 self.assertIn("--allow", b, f"{m}: {c}")
@@ -967,9 +944,9 @@ class TestStateBuiltinHint(Base):
     def test_state_builtin_autopermit_is_chain_guarded(self):
         # UX1 security: the auto-permit only applies to a simple builtin — a chained
         # or substituted one is NOT auto-run.
-        self.write(mode="shell", readonly=True, color=False)
+        self.write(mode="shell", color=False)
         for c in ["export A=1; rm -rf x", "export A=$(rm x)", "unset X && rm y"]:
-            self.assertIn("isn't allowed", self.proc("> " + c)["block"], c)
+            self.assertIn("gated set", self.proc("> " + c)["block"], c)
 
 
 class TestRcAliases(Base):
@@ -1063,7 +1040,7 @@ class TestNormalizeArgv(unittest.TestCase):
     def test_subcommand_to_flag(self):
         n = _engine.normalize_argv
         self.assertEqual(n(["mode", "shell"]), ["--mode", "shell"])
-        self.assertEqual(n(["readonly", "on"]), ["--readonly", "on"])
+        self.assertEqual(n(["trust", "on"]), ["--trust", "on"])
         self.assertEqual(n(["restart"]), ["--restart"])
         self.assertEqual(n(["runner"]), ["--runner"])
         self.assertEqual(n(["allow", "git", "status"]), ["--allow", "git status"])
@@ -1158,15 +1135,17 @@ class TestConfig(Base):
         cfg = _engine.load_config()
         self.assertEqual(cfg["mode"], "cwd")
         self.assertEqual(cfg["allow"], [])
-        self.assertTrue(cfg["readonly"])   # read-only mode is ON by default
+        self.assertFalse(cfg["trust"])     # gated by default (trust off)
+        self.assertNotIn("readonly", cfg)  # the old key is gone
         self.assertFalse(cfg["rc"])
         self.assertTrue(cfg["color"])
 
-    def test_readonly_default_allows_inspection_refuses_writes(self):
-        # With no config at all, read-only commands run and writes are refused.
+    def test_gated_default_allows_inspection_refuses_rest(self):
+        # With no config at all, gated tools run and everything else is refused.
         os.unlink(self.cfg)
-        self.assertNotIn("isn't allowed", self.proc("> ls")["block"])
-        self.assertIn("isn't allowed", self.proc("> rm -rf /tmp/x")["block"])
+        self.assertNotIn("gated set", self.proc("> ls")["block"])       # runs
+        self.assertIn("gated set", self.proc("> rm -rf /tmp/x")["block"])  # refused
+        self.assertIn("gated set", self.proc("> git log")["block"])     # git not gated
 
     def test_rc_roundtrips(self):
         _engine.main(["--rc", "on"])
@@ -1193,12 +1172,12 @@ class TestConfig(Base):
         # A hand-edited config with wrongly-typed values falls back per key
         # instead of crashing callers that index/append.
         with open(self.cfg, "w") as f:
-            json.dump({"allow": "ls", "launch": 5, "readonly": "off",
+            json.dump({"allow": "ls", "launch": 5, "trust": "on",
                        "prefix": 9, "mode": ["x"]}, f)
         c = _engine.load_config()
         self.assertEqual(c["allow"], [])       # non-list -> default []
         self.assertEqual(c["launch"], [])
-        self.assertIs(c["readonly"], True)     # "off" (str) isn't a bool -> default
+        self.assertIs(c["trust"], False)       # "on" (str) isn't a bool -> default
         self.assertEqual(c["prefix"], ">")     # non-str -> default
         self.assertEqual(c["mode"], "cwd")     # non-str -> default
 
@@ -1248,7 +1227,7 @@ class TestConfig(Base):
 
 class TestCustomPrefix(Base):
     def test_custom_prefix_intercepts_and_default_passes(self):
-        self.write(prefix="!!", readonly=True, color=False)
+        self.write(prefix="!!", color=False)
         self.assertIn("[cwd]", self.proc("!! pwd")["block"])       # !! runs
         self.assertEqual(self.proc("> pwd"), {"passthrough": True})  # > no longer
 
@@ -1282,7 +1261,7 @@ class TestHookOutput(Base):
 
     def test_normal_prompt_emits_nothing(self):
         # The coexistence guarantee: a non-sethu prompt produces NO output.
-        self.write(readonly=True)
+        self.write()
         r = self._run("just a normal message to claude")
         self.assertEqual(r.returncode, 0)
         self.assertEqual(r.stdout.strip(), "")
@@ -1298,7 +1277,7 @@ class TestHookOutput(Base):
         self.assertNotIn('"oops', _engine.load_config()["allow"])
 
     def test_run_command_emits_block(self):
-        self.write(readonly=True)
+        self.write()
         out = json.loads(self._run("> ls").stdout)
         self.assertEqual(out["decision"], "block")
         self.assertIn("ls", out["reason"])
@@ -1353,8 +1332,8 @@ class TestEveryResponseLeadsWithIcon(Base):
         self.addCleanup(self._shutdown, "iconinv")
         lead = _engine.ICON + " · "
         cases = [
-            ("> ls", {"readonly": True}),             # a run (result header)
-            ("> rm -rf x", {"readonly": True}),       # a refusal
+            ("> ls", {}),                             # a run (result header)
+            ("> rm -rf x", {}),                       # a refusal
             ("> cd /tmp", {"mode": "cwd"}),           # cd
             ("> vim", {"allow": ["vim"]}),            # interactive refusal
             (">> echo hi", {"allow": ["echo"]}),      # >> local note (systemMessage)
