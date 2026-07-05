@@ -270,7 +270,7 @@ class TestSafety(Base):
         r = self.proc("> rm -rf /tmp/x")
         self.assertIn("gated set", r["block"])
 
-    def test_readonly_blocks_dangerous(self):
+    def test_gated_blocks_dangerous(self):
         self.write()
         for c in ["ls; rm -rf ~", "echo x > /tmp/f", "cat README | sh", "git push"]:
             self.assertIn("gated set", self.proc("> " + c)["block"], c)
@@ -331,11 +331,11 @@ class TestSafety(Base):
         for c in ['echo "$(rm -rf x)"', 'echo "`rm`"']:
             self.assertIn("gated set", self.proc("> " + c)["block"], c)
 
-    def test_readonly_no_newline_injection(self):
+    def test_gated_no_newline_injection(self):
         self.write()
         self.assertIn("gated set", self.proc("> ls\nrm -rf x")["block"])
 
-    def test_readonly_git_writes_refused(self):
+    def test_git_writes_refused(self):
         self.write()
         for c in ["git config user.name hacked", "git stash", "git branch -D main",
                   "git tag -d v1", "git remote add evil url"]:
@@ -602,7 +602,7 @@ class TestRunner(Base):
         self.assertNotIn("gated set", r["block"])
         self.assertIn("hello", r["block"])
 
-    def test_readonly_allows_inspection(self):
+    def test_gated_allows_inspection(self):
         self.write()
         r = self.proc("> ls")
         self.assertNotIn("gated set", r["block"])

@@ -232,12 +232,12 @@ def _welcome_marker():
 
 FIRST_RUN_HINT = (
     f"{ICON} · sethu is installed. Run terminal commands right from this box:\n"
-    "• `> git status`  → runs it, shows output to YOU only. Free (Claude never "
-    "sees it).\n"
-    "• `>> git status` → runs it AND sends the output to Claude (costs tokens).\n"
+    "• `> grep -n TODO src/`  → runs it, shows output to YOU only. Free (Claude "
+    "never sees it).\n"
+    "• `>> grep -n TODO src/` → runs it AND sends the output to Claude (costs tokens).\n"
     "Works when Claude is idle (a `>` typed while Claude is thinking goes to the "
-    "model). Read-only commands work now; writes need `sethu --allow \"<cmd>\"`. "
-    "Type `sethu` for the menu."
+    "model). Safe tools (ls/cat/grep/jq…) work now; for git/find/npm/… run "
+    "`sethu --allow <tool>` once. Type `sethu` for the menu."
 )
 
 

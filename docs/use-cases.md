@@ -3,9 +3,10 @@
 Concrete ways people use sethu, with the commands they'd type. Two things decide
 the style:
 
-- **`> cmd`** — you see the output, **free** (the model never sees it). Read-only
-  commands (git, ls, cat, grep, ps, jq…) work **out of the box**; anything that
-  writes or installs needs `sethu --allow "cmd"` once.
+- **`> cmd`** — you see the output, **free** (the model never sees it). A curated set
+  of **gated** tools (ls, cat, grep, ps, jq, wc…) works **out of the box**; anything
+  that can write or run other programs (git, find, npm…) needs `sethu --allow <tool>`
+  once (that permits the whole tool, any flags).
 - **`>> cmd`** — output is *also* sent to Claude (costs tokens) — use it when you
   want Claude to act on the result.
 - **`sethu --launch "cmd"`** — interactive/full-screen programs, in a real pane.
@@ -13,28 +14,31 @@ the style:
 ---
 
 ## 1. Git — the most common use
-Peek at repo state constantly without paying tokens or cluttering the chat.
+Peek at repo state constantly without paying tokens or cluttering the chat. `git`
+can write and (via config/aliases) run other programs, so it isn't gated — allow it
+once, then all of git runs:
 
 ```text
+sethu --allow git          # one-time; permits the whole `git` tool (any subcommand)
 > git status
 > git diff                 > git diff --staged
 > git log --oneline -15
 > git show HEAD            > git blame src/app.py
-> git ls-files             > git describe --tags
 >> git diff                # share with Claude: "review these changes"
 ```
 
-Read-only git subcommands (`status`, `log`, `diff`, `show`, `blame`, `ls-files`,
-`describe`, `rev-parse`, `shortlog`, `reflog`…) work out of the box. A few —
-`branch`, `stash`, `remote`, `config` — can *also write* (`git branch -D`,
-`git stash drop`, `git remote add`, `git config <key> <value>`), so they're **not**
-auto-allowed. Permit them explicitly if you want them: `sethu --allow "git branch"`.
+`--allow git` is whole-tool, so `git push` / `git reset --hard` run too — that's the
+trade for a simple model (sethu warns you when you allow a tool that can run other
+programs). It's your call: for inspection-only, just be mindful; for full control,
+leave git un-allowed and run it in your own terminal.
 
 ## 2. Filesystem & navigation
+`ls`/`pwd`/`du`/`df` are gated; `find` and `tree` can write/exec via a flag, so
+`sethu --allow find` / `--allow tree` once to use them.
 ```text
-> ls -la                   > ls -R src
-> tree -L 2                > pwd
-> find . -name "*.py"      > du -sh *      > df -h
+> ls -la                   > ls -R src        > pwd
+> du -sh *                 > df -h
+sethu --allow find         > find . -name "*.py"
 ```
 
 ## 3. Reading files & config (keeps big files out of context)
@@ -116,9 +120,9 @@ When you *want* the tokens spent because Claude should act on it:
 ## 12. Managing sethu
 ```text
 sethu                      # options menu
-sethu --allow "npm test"   sethu --readonly off
+sethu --allow git          sethu --gated-list
 sethu --mode shell         sethu --timeout 60
-sethu --trust on           # ⚠ run anything (footgun)
+sethu --trust on           # ⚠ run anything, gate off (footgun)
 sethu --runner             # show config
 ```
 
