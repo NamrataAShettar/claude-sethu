@@ -63,6 +63,21 @@ with one, either don't make it or update this doc deliberately.
 
 ## Security
 
+- **What auto-runs is mode-INDEPENDENT; mode only decides statefulness.** This is a
+  load-bearing invariant — don't erode it:
+  - **Auto-runs without `--allow`, in every mode:** read-only commands (the `READONLY`
+    set) **plus** the set-a-variable/alias builtins (`export`/`alias`/`unalias`/`unset`),
+    all chain-guarded. None of these execute external code.
+  - **Never auto-runs, in any mode:** anything that executes code — `source`/`.` (they
+    run a file's contents = arbitrary code) and every non-read-only program → requires
+    `--allow` or `--trust`.
+  - `mode` (cwd/stateless/shell) changes only whether state *persists*, never *what is
+    permitted*. A state builtin runs-and-persists in shell mode; in cwd/stateless it's a
+    no-op, so show a concise "won't persist, use `--mode shell`" note (don't execute it,
+    don't refuse it as forbidden). Presentation differs by mode; permission does not.
+  - Do NOT make the auto-allow set mode-dependent (e.g. auto-permitting `source` only in
+    shell mode) — it's confusing and, for `source`, it would open arbitrary execution in
+    the default mode. If you're tempted to special-case a mode's permissions, don't.
 - **Read-only is decided by FLAGS, not just program names.** Every entry in the
   `READONLY` set needs an explicit exec/write-flag policy (`fd -x`, `rg --pre`,
   `yq -i`, `git --ext-diff` were misses). Auditing the whole set is part of any
