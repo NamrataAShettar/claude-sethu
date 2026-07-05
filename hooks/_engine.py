@@ -790,34 +790,42 @@ def _spawn_daemon(sock, cwd_hint, use_rc=False, timeout=None):
 
 
 # L7: serialize daemon spawns for a session so two racing first-commands don't each
-# spawn a daemon (the second would unlink the first's socket and orphan a live
-# daemon). The winner of an O_EXCL lock spawns; the loser waits for the socket via
-# the existing connect-retry loop. A lock left by a spawner that died is reclaimed
-# once it's older than _SPAWN_LOCK_STALE (a spawn completes in ~1s).
-_SPAWN_LOCK_STALE = 10
+# spawn a daemon (the second would unlink the first's socket and orphan a live daemon).
+# Uses fcntl.flock on `<sock>.lock`: the lock is atomic AND the kernel releases it if
+# the holder dies mid-spawn — so there's no stale-timeout heuristic and no reclaim race
+# (both were sources of a double-spawn / degraded window). The winner spawns; a loser
+# (flock would block) skips to the connect-retry loop and picks up the winner's daemon.
+# The lock file is intentionally NOT unlinked — flock guards the open file, not the
+# name, so unlinking it while held would let a concurrent open race onto a fresh inode
+# and both "win". `_sweep_temp` ages out dead sessions' lock files instead. fcntl is
+# imported lazily so this Unix-only path doesn't break `import _engine` on Windows
+# (where the portable cwd/stateless runner still works).
 
 
 def _acquire_spawn_lock(sock):
-    lock = sock + ".lock"
+    """Take the per-session spawn lock. Returns an open fd to hold until spawn+connect
+    finish (pass it to `_release_spawn_lock`), or None if another spawner holds it."""
+    import fcntl
     try:
-        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-        return True
-    except FileExistsError:
-        try:
-            if time.time() - os.stat(lock).st_mtime > _SPAWN_LOCK_STALE:
-                os.unlink(lock)   # stale (spawner died) — reclaim it
-                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
-                return True
-        except OSError:
-            pass
-        return False
+        fd = os.open(sock + ".lock", os.O_CREAT | os.O_WRONLY, 0o600)
     except OSError:
-        return False
-
-
-def _release_spawn_lock(sock):
+        return None
     try:
-        os.unlink(sock + ".lock")
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except OSError:
+        os.close(fd)      # already held by another spawner
+        return None
+
+
+def _release_spawn_lock(fd):
+    import fcntl
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass
+    try:
+        os.close(fd)
     except OSError:
         pass
 
@@ -841,9 +849,9 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
             # spawn lock (L7) so concurrent first-commands don't each spawn: the lock
             # winner removes any stale socket and spawns; the loser skips straight to
             # the connect-retry loop and picks up the winner's daemon.
-            spawned = _acquire_spawn_lock(sock)
+            lock_fd = _acquire_spawn_lock(sock)
             try:
-                if spawned:
+                if lock_fd is not None:
                     try:
                         os.unlink(sock)
                     except OSError:
@@ -856,8 +864,8 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
                     except OSError:
                         time.sleep(0.05)
             finally:
-                if spawned:
-                    _release_spawn_lock(sock)
+                if lock_fd is not None:
+                    _release_spawn_lock(lock_fd)
             if s is None:
                 return ("sethu shell error: could not start the shell daemon", None)
         s.sendall((cmd + "\n").encode("utf-8"))

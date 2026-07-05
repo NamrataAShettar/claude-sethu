@@ -51,7 +51,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   kill / reap shell daemons              TestKillDaemons                        [x]
   timeout recovery (no wedge/bleed) H3   TestShellMode                          [x]
   output byte-cap (RAM/disk) ST1/ST7     TestOutputCap / TestShellMode          [x]
-  daemon-spawn lock (L7) / marker O_EXCL  TestSpawnLock / TestFirstRunHint       [x]
+  daemon-spawn lock (L7, flock) / marker  TestSpawnLock / TestFirstRunHint       [x]
   first-run welcome hint                 TestFirstRunHint                       [x]
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
@@ -1209,26 +1209,34 @@ class TestFirstRunHint(Base):
 
 
 class TestSpawnLock(Base):
-    """L7: only one client spawns a daemon per session; the rest wait."""
+    """L7: only one client spawns a daemon per session; the rest wait (fcntl.flock)."""
 
     def _sock(self, name):
         p = os.path.join(tempfile.gettempdir(), name)
-        self.addCleanup(_engine._release_spawn_lock, p)
+        # flock never unlinks its lock file (by design), so clean it up after the test.
+        self.addCleanup(lambda: os.path.exists(p + ".lock") and os.unlink(p + ".lock"))
         return p
 
     def test_lock_is_exclusive(self):
         sock = self._sock("sethu-testlock-p9.sock")
-        self.assertTrue(_engine._acquire_spawn_lock(sock))    # winner spawns
-        self.assertFalse(_engine._acquire_spawn_lock(sock))   # loser waits
-        _engine._release_spawn_lock(sock)
-        self.assertTrue(_engine._acquire_spawn_lock(sock))    # freed → reacquire
+        fd = _engine._acquire_spawn_lock(sock)
+        self.assertIsNotNone(fd)                                   # winner spawns
+        try:
+            self.assertIsNone(_engine._acquire_spawn_lock(sock))  # loser blocked
+        finally:
+            _engine._release_spawn_lock(fd)
+        fd2 = _engine._acquire_spawn_lock(sock)                    # released → reacquire
+        self.assertIsNotNone(fd2)
+        _engine._release_spawn_lock(fd2)
 
-    def test_stale_lock_is_reclaimed(self):
-        sock = self._sock("sethu-teststale-p9.sock")
-        lock = sock + ".lock"
-        open(lock, "w").close()
-        os.utime(lock, (1_000_000, 1_000_000))   # 1970 → far past the stale window
-        self.assertTrue(_engine._acquire_spawn_lock(sock))
+    def test_leftover_lock_file_does_not_block(self):
+        # flock guards the holder, not the file — a dead session's leftover lock file
+        # (nobody flocked) must be immediately acquirable, not stuck until a timeout.
+        sock = self._sock("sethu-testleftover-p9.sock")
+        open(sock + ".lock", "w").close()          # stale file, no live holder
+        fd = _engine._acquire_spawn_lock(sock)
+        self.assertIsNotNone(fd)
+        _engine._release_spawn_lock(fd)
 
 
 class TestConfig(Base):
