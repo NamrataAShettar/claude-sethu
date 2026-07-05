@@ -4,6 +4,44 @@ sethu is a Claude Code plugin: a `UserPromptSubmit` hook (`hooks/sethu_hook.py` 
 `hooks/_engine.py`) that runs terminal commands typed as `> cmd` / `>> cmd`, plus a
 management CLI (`sethu --allow …`, `--mode …`, `--runner`). Pure stdlib, no deps.
 
+## Code map
+(By module and function/section, not line numbers, so it survives edits. `_engine.py`
+is banner-commented — `# ── <section> ──` — grep those to jump.)
+
+- **`hooks/sethu_hook.py`** — the `UserPromptSubmit` entry. Cheap fast-path gate
+  (`_maybe_sethu`, decides with `json`/`os` only, does NOT import `_engine` for a
+  normal prompt); routes a sethu prompt to `process()`; runs `sethu …` management
+  commands as a subprocess; `_block` emits the zero-token `decision:block`.
+- **`hooks/_engine.py`** — the core, in banner sections:
+  - *config* — `DEFAULTS`, `load_config` (type + value coercion, whitespace-canonicalizes
+    allow/launch), `save_config`, `config_path`.
+  - *allow / launch matching* — `_matches` (exact/prefix), `_is_chain_unsafe` /
+    `_has_unquoted_ops` / `_SUBST_META` (the injection-hardened chain guard).
+  - *per-session cwd (cwd mode)* — `is_cd`, `resolve_cd`, `set_cwd`/`get_cwd`.
+  - *command execution* — read-only decision (`is_readonly_safe`, `READONLY`,
+    `_RO_WRITE_FLAGS`, `_DANGER`, `_git_subcommand`/`READONLY_GIT`, `_why_refused`,
+    `readonly_list_text`); interactive/TUI detection (`is_interactive`, `_REPL`,
+    `_REPL_BATCH_FLAGS`, `INTERACTIVE`, `_looks_full_screen`); `run_capture` (the
+    captured runner); truncation + temp hygiene (`_truncate`, `_out_path`,
+    `_sweep_temp`, `_output_path`); `launch_in_terminal` + `_launch_command_script`.
+  - *persistent shell (shell mode)* — `shell_run`, `_sock_path`, `_spawn_daemon`,
+    `kill_daemons`, `_timeout_msg` (talks to `_shelld.py`).
+  - *the core: process one submitted prompt* — `process()` (the one entry that returns
+    `{passthrough|block|context}`), plus the header/color helpers `_header`, `_reply`,
+    `_msg`, `_c`, `_ANSI`, `ICON`.
+  - *management CLI* — `main`, `normalize_argv` (subcommand→flag aliasing), `_Parser`
+    (branded errors), `help_text`, `_print_config`.
+- **`hooks/_shelld.py`** — the persistent-shell daemon (PTY + unix-socket server) that
+  backs shell mode; wire protocol version `_PROTO`.
+- **`hooks/session_start.py`** — SessionStart hook (first-run welcome).
+- **`hooks/run.sh`** — POSIX-sh launcher: exec `python3`, or degrade gracefully when it's
+  missing (the tolerant no-python3 block shim).
+- **`hooks/hooks.json`** — hook registration. **`.claude-plugin/`** — `plugin.json`
+  (version lives here), `marketplace.json`.
+- **`tests/test_sethu.py`** — the whole suite + the coverage table and
+  `TestCoverageEnforcement` (top of file). **`docs/`** — design-guidelines, testing,
+  use-cases.
+
 ## Before any change
 - **Run it against the checklist in [`docs/design-guidelines.md`](docs/design-guidelines.md)**
   (UX / correctness / security / performance / storage). That doc is the single
