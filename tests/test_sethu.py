@@ -51,6 +51,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   kill / reap shell daemons              TestKillDaemons                        [x]
   timeout recovery (no wedge/bleed) H3   TestShellMode                          [x]
   output byte-cap (RAM/disk) ST1/ST7     TestOutputCap / TestShellMode          [x]
+  daemon-spawn lock (L7) / marker O_EXCL  TestSpawnLock / TestFirstRunHint       [x]
   first-run welcome hint                 TestFirstRunHint                       [x]
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
@@ -1185,6 +1186,14 @@ class TestFirstRunHint(Base):
         self.assertEqual(os.path.dirname(_engine._welcome_marker()),
                          os.path.dirname(_engine.config_path()))
 
+    def test_lost_race_stays_quiet(self):
+        # If a concurrent session already claimed the marker (O_EXCL), stay quiet
+        # even though this call passed the exists() check before it was created.
+        m = _engine._welcome_marker()
+        os.makedirs(os.path.dirname(m), exist_ok=True)
+        os.close(os.open(m, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        self.assertIsNone(_engine.first_run_hint())
+
     def test_skips_hint_when_marker_unwritable(self):
         # If the marker can't be persisted, don't nudge (else it repeats every
         # session on a read-only config dir).
@@ -1197,6 +1206,29 @@ class TestFirstRunHint(Base):
         finally:
             os.environ["SETHU_CONFIG"] = self.cfg
             os.unlink(f.name)
+
+
+class TestSpawnLock(Base):
+    """L7: only one client spawns a daemon per session; the rest wait."""
+
+    def _sock(self, name):
+        p = os.path.join(tempfile.gettempdir(), name)
+        self.addCleanup(_engine._release_spawn_lock, p)
+        return p
+
+    def test_lock_is_exclusive(self):
+        sock = self._sock("sethu-testlock-p9.sock")
+        self.assertTrue(_engine._acquire_spawn_lock(sock))    # winner spawns
+        self.assertFalse(_engine._acquire_spawn_lock(sock))   # loser waits
+        _engine._release_spawn_lock(sock)
+        self.assertTrue(_engine._acquire_spawn_lock(sock))    # freed → reacquire
+
+    def test_stale_lock_is_reclaimed(self):
+        sock = self._sock("sethu-teststale-p9.sock")
+        lock = sock + ".lock"
+        open(lock, "w").close()
+        os.utime(lock, (1_000_000, 1_000_000))   # 1970 → far past the stale window
+        self.assertTrue(_engine._acquire_spawn_lock(sock))
 
 
 class TestConfig(Base):

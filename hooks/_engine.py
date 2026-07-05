@@ -187,6 +187,7 @@ def _sweep_temp(now, force=False):
         if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
                 (n.startswith("sethu-launch-") and n.endswith(".command")) or
                 (n.startswith("sethu-") and n.endswith(".sock")) or
+                (n.startswith("sethu-") and n.endswith(".sock.lock")) or
                 n.startswith("sethu-cwd-")):
             continue
         try:
@@ -259,7 +260,12 @@ def first_run_hint():
         return None
     try:
         os.makedirs(os.path.dirname(marker), exist_ok=True)
-        open(marker, "w").close()
+        # Atomic claim (O_EXCL): if two sessions start together and both pass the
+        # exists() check above, only one wins the create — the other gets
+        # FileExistsError and stays quiet, so the welcome shows exactly once.
+        os.close(os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    except FileExistsError:
+        return None
     except Exception:
         # Can't record that we showed it → skip, so a read-only config dir doesn't
         # get the "once per machine" hint on every single session.
@@ -778,6 +784,39 @@ def _spawn_daemon(sock, cwd_hint, use_rc=False, timeout=None):
     )
 
 
+# L7: serialize daemon spawns for a session so two racing first-commands don't each
+# spawn a daemon (the second would unlink the first's socket and orphan a live
+# daemon). The winner of an O_EXCL lock spawns; the loser waits for the socket via
+# the existing connect-retry loop. A lock left by a spawner that died is reclaimed
+# once it's older than _SPAWN_LOCK_STALE (a spawn completes in ~1s).
+_SPAWN_LOCK_STALE = 10
+
+
+def _acquire_spawn_lock(sock):
+    lock = sock + ".lock"
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        return True
+    except FileExistsError:
+        try:
+            if time.time() - os.stat(lock).st_mtime > _SPAWN_LOCK_STALE:
+                os.unlink(lock)   # stale (spawner died) — reclaim it
+                os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+                return True
+        except OSError:
+            pass
+        return False
+    except OSError:
+        return False
+
+
+def _release_spawn_lock(sock):
+    try:
+        os.unlink(sock + ".lock")
+    except OSError:
+        pass
+
+
 def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
     """Run `cmd` in this session's persistent shell (shell mode), returning
     (output, exit_code). Connects to the per-session daemon over its Unix socket,
@@ -793,19 +832,27 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
         try:
             s = _connect(sock, wait)  # an existing, live daemon
         except OSError:
-            # socket missing, or stale (daemon gone → "connection refused").
-            # Remove it and spawn a fresh daemon, then connect once it's up.
+            # socket missing, or stale (daemon gone → "connection refused"). Under a
+            # spawn lock (L7) so concurrent first-commands don't each spawn: the lock
+            # winner removes any stale socket and spawns; the loser skips straight to
+            # the connect-retry loop and picks up the winner's daemon.
+            spawned = _acquire_spawn_lock(sock)
             try:
-                os.unlink(sock)
-            except OSError:
-                pass
-            _spawn_daemon(sock, cwd_hint, use_rc, timeout)
-            for _ in range(80):
-                try:
-                    s = _connect(sock, wait)
-                    break
-                except OSError:
-                    time.sleep(0.05)
+                if spawned:
+                    try:
+                        os.unlink(sock)
+                    except OSError:
+                        pass
+                    _spawn_daemon(sock, cwd_hint, use_rc, timeout)
+                for _ in range(80):
+                    try:
+                        s = _connect(sock, wait)
+                        break
+                    except OSError:
+                        time.sleep(0.05)
+            finally:
+                if spawned:
+                    _release_spawn_lock(sock)
             if s is None:
                 return ("sethu shell error: could not start the shell daemon", None)
         s.sendall((cmd + "\n").encode("utf-8"))
