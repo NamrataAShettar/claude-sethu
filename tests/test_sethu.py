@@ -140,17 +140,18 @@ class TestGatedFn(unittest.TestCase):
             self.assertFalse(_engine.is_gated(c), c)
 
     def test_why_refused_not_gated(self):
-        # A non-gated tool's refusal names it and points at `--allow <tool>`.
+        # A non-gated tool's refusal names it and says it's not gated (the `--allow`
+        # pointer is in the refusal's bullets, not this reason line).
         msg = _engine._why_refused("npm test", {})
         self.assertIn("npm", msg)
-        self.assertIn("gated set", msg)
-        self.assertIn("--allow npm", msg)
+        self.assertIn("run it automatically", msg)   # explains it's not auto-run
+        self.assertNotIn("--allow", msg)   # reason-only; actions live in the bullets
 
     def test_why_refused_source_is_gated_exception(self):
         # source/. execute a file → not gated even though they're builtins.
         msg = _engine._why_refused("source venv/bin/activate", {})
         self.assertIn("contents of a file", msg)
-        self.assertIn("--allow source", msg)
+        self.assertNotIn("--allow", msg)   # reason-only; actions live in the bullets
 
     def test_gated_set_excludes_write_exec_capable_tools(self):
         # INVARIANT (from the flag-safety audit): no tool that can write/delete a
@@ -272,12 +273,12 @@ class TestInteractiveFn(unittest.TestCase):
 class TestSafety(Base):
     def test_not_allowed_refused(self):
         r = self.proc("> rm -rf /tmp/x")
-        self.assertIn("gated set", r["block"])
+        self.assertIn("gated", r["block"])
 
     def test_gated_blocks_dangerous(self):
         self.write()
         for c in ["ls; rm -rf ~", "echo x > /tmp/f", "cat README | sh", "git push"]:
-            self.assertIn("gated set", self.proc("> " + c)["block"], c)
+            self.assertIn("gated", self.proc("> " + c)["block"], c)
 
     def test_interactive_allowlisted_is_refused(self):
         self.write(allow=["vi"])
@@ -294,21 +295,21 @@ class TestSafety(Base):
     def test_chained_cd_refused_not_exempt(self):
         # H4: a chained cd must hit the normal gate (refused), not the cd exemption.
         self.write()
-        self.assertIn("gated set", self.proc("> cd /tmp; rm -rf ~")["block"])
+        self.assertIn("gated", self.proc("> cd /tmp; rm -rf ~")["block"])
 
     def test_allowlist_no_pipe_injection(self):
         # Allowing `ls` must NOT permit `ls | rm -rf x` (the reported bug).
         self.write(allow=["ls"])
-        self.assertIn("gated set", self.proc("> ls | grep x | rm -rf x")["block"])
-        self.assertIn("gated set", self.proc("> ls; rm -rf x")["block"])
-        self.assertIn("gated set", self.proc("> ls && rm -rf x")["block"])
-        self.assertIn("gated set", self.proc("> ls $(rm)")["block"])
+        self.assertIn("gated", self.proc("> ls | grep x | rm -rf x")["block"])
+        self.assertIn("gated", self.proc("> ls; rm -rf x")["block"])
+        self.assertIn("gated", self.proc("> ls && rm -rf x")["block"])
+        self.assertIn("gated", self.proc("> ls $(rm)")["block"])
         # but plain args are still fine
-        self.assertNotIn("gated set", self.proc("> ls -la")["block"])
+        self.assertNotIn("gated", self.proc("> ls -la")["block"])
 
     def test_allowlist_no_newline_injection(self):
         self.write(allow=["ls"])
-        self.assertIn("gated set", self.proc("> ls\nrm -rf x")["block"])
+        self.assertIn("gated", self.proc("> ls\nrm -rf x")["block"])
 
     def test_quoted_metachars_are_allowed(self):
         # A `;`/`|` INSIDE quotes is argument text, not a command chain, so an
@@ -317,7 +318,7 @@ class TestSafety(Base):
         for c in ['python3 -c "import os; print(os.getpid())"',
                   "python3 -c 'a; b; c'",
                   'echo "a|b;c"']:
-            self.assertNotIn("gated set", self.proc("> " + c)["block"], c)
+            self.assertNotIn("gated", self.proc("> " + c)["block"], c)
 
     def test_unquoted_ops_still_refused_with_interpreter(self):
         # But a real unquoted chain after the interpreter is still refused.
@@ -326,24 +327,24 @@ class TestSafety(Base):
                   "python3 -c \"print(1)\" | sh",
                   'python3 script.py > /etc/passwd',
                   'python3 -c "print(1)" && rm x']:
-            self.assertIn("gated set", self.proc("> " + c)["block"], c)
+            self.assertIn("gated", self.proc("> " + c)["block"], c)
 
     def test_command_substitution_refused_even_quoted(self):
         # $( ) and backticks EXECUTE even inside quotes → always refused, even for a
         # gated/allowed tool. (Plain ${VAR} parameter expansion is harmless and runs.)
         self.write(allow=["echo"])
         for c in ['echo "$(rm -rf x)"', 'echo "`rm`"']:
-            self.assertIn("gated set", self.proc("> " + c)["block"], c)
+            self.assertIn("gated", self.proc("> " + c)["block"], c)
 
     def test_gated_no_newline_injection(self):
         self.write()
-        self.assertIn("gated set", self.proc("> ls\nrm -rf x")["block"])
+        self.assertIn("gated", self.proc("> ls\nrm -rf x")["block"])
 
     def test_git_writes_refused(self):
         self.write()
         for c in ["git config user.name hacked", "git stash", "git branch -D main",
                   "git tag -d v1", "git remote add evil url"]:
-            self.assertIn("gated set", self.proc("> " + c)["block"], c)
+            self.assertIn("gated", self.proc("> " + c)["block"], c)
 
 
 class TestManagementCLI(Base):
@@ -520,16 +521,17 @@ class TestRefusalMessages(Base):
 
     def test_refusal_explains_why_and_still_offers_allow(self):
         self.write(color=False)
-        cases = {
-            "git log": "gated set",       # git isn't gated (can exec/write)
-            "sort -o out f": "gated set", # sort isn't gated
-            "npm test": "gated set",      # npm isn't gated
-            "ls; rm -rf ~": "joined by",  # chaining refused
-        }
-        for cmd, why in cases.items():
+        # A non-gated tool: explain why (can change files / run programs) + offer --allow.
+        for cmd in ("git log", "sort -o out f", "npm test"):
             b = self.proc("> " + cmd)["block"]
-            self.assertIn(why, b, cmd)
-            self.assertIn('sethu --allow', b, cmd)   # still offered (user's call)
+            self.assertIn("change files or run other programs", b, cmd)
+            self.assertIn("sethu --allow", b, cmd)   # allowing the tool IS the fix
+        # A chain can't be fixed by allowing a tool → no "Allow this tool" bullet, but
+        # the reason explains it and --launch/--trust remain.
+        b = self.proc("> ls; rm -rf ~")["block"]
+        self.assertIn("joined by", b)
+        self.assertNotIn("sethu --allow", b)
+        self.assertIn("sethu --launch", b)
 
     def test_timeout_message_mentions_hook_budget(self):
         self.assertIn("hook budget", _engine._timeout_msg(20, "sleep 99"))
@@ -550,14 +552,14 @@ class TestRefusalMessages(Base):
         # allowing that tool.
         self.write(color=False)
         self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
-        self.assertIn("--allow npm", self.proc("> npm test")["block"])
+        self.assertIn('--allow "npm"', self.proc("> npm test")["block"])
 
 
 class TestTrust(Base):
     def test_trust_bypasses_allowlist(self):
         self.write(trust=True)  # nothing allowlisted
         r = self.proc("> echo trusted")
-        self.assertNotIn("gated set", r["block"])
+        self.assertNotIn("gated", r["block"])
         self.assertIn("trusted", r["block"])
 
     def test_trust_marker_in_header(self):
@@ -580,7 +582,7 @@ class TestTrust(Base):
         # With trust on, a non-gated tool runs (no refusal) — the gate is off.
         self.write(trust=True, allow=[])
         r = self.proc("> mkdir /tmp/sethu-trust-test")["block"]
-        self.assertNotIn("gated set", r)
+        self.assertNotIn("gated", r)
 
 
 class TestRunner(Base):
@@ -592,7 +594,7 @@ class TestRunner(Base):
         with open(script, "w") as f:
             f.write("print('hi from script')")
         r = self.proc("> python3 " + script)["block"]
-        self.assertNotIn("gated set", r)
+        self.assertNotIn("gated", r)
         self.assertNotIn("interactive", r)
         self.assertIn("hi from script", r)
 
@@ -603,13 +605,13 @@ class TestRunner(Base):
     def test_explicit_allow_runs(self):
         self.write(allow=["echo"])
         r = self.proc("> echo hello")
-        self.assertNotIn("gated set", r["block"])
+        self.assertNotIn("gated", r["block"])
         self.assertIn("hello", r["block"])
 
     def test_gated_allows_inspection(self):
         self.write()
         r = self.proc("> ls")
-        self.assertNotIn("gated set", r["block"])
+        self.assertNotIn("gated", r["block"])
 
     def test_completion_header(self):
         self.write()
@@ -893,7 +895,7 @@ class TestShellMode(Base):
         sentinel = os.path.join(self.tmp, "H4_PWNED")
         r = self.proc(f"> cd /tmp; touch {sentinel}", sid=sid)
         self.assertIn("block", r)                 # refused…
-        self.assertIn("gated set", r["block"])
+        self.assertIn("gated", r["block"])
         time.sleep(0.3)                           # give any (buggy) execution a chance
         self.assertFalse(os.path.exists(sentinel), "chained cd executed in shell mode!")
 
@@ -1018,7 +1020,7 @@ class TestStateBuiltinHint(Base):
         # or substituted one is NOT auto-run.
         self.write(mode="shell", color=False)
         for c in ["export A=1; rm -rf x", "export A=$(rm x)", "unset X && rm y"]:
-            self.assertIn("gated set", self.proc("> " + c)["block"], c)
+            self.assertIn("gated", self.proc("> " + c)["block"], c)
 
 
 class TestRcAliases(Base):
@@ -1311,9 +1313,9 @@ class TestConfig(Base):
     def test_gated_default_allows_inspection_refuses_rest(self):
         # With no config at all, gated tools run and everything else is refused.
         os.unlink(self.cfg)
-        self.assertNotIn("gated set", self.proc("> ls")["block"])       # runs
-        self.assertIn("gated set", self.proc("> rm -rf /tmp/x")["block"])  # refused
-        self.assertIn("gated set", self.proc("> git log")["block"])     # git not gated
+        self.assertNotIn("gated", self.proc("> ls")["block"])       # runs
+        self.assertIn("gated", self.proc("> rm -rf /tmp/x")["block"])  # refused
+        self.assertIn("gated", self.proc("> git log")["block"])     # git not gated
 
     def test_rc_roundtrips(self):
         _engine.main(["--rc", "on"])
