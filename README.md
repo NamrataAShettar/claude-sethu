@@ -228,8 +228,8 @@ Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/iss
 The header is colorblind-safe (Okabe-Ito) and never color-only — status, mode, and
 warnings are always words, so a screen reader gets the full meaning; `NO_COLOR` drops
 color. For readers, **`sethu --plain on`** (or `SETHU_PLAIN`) swaps the `|^=^|` icon and
-`·✓✗⚠→` glyphs for a plain `sethu:` prefix + words (e.g. `sethu: [cwd] exit 0 $ git
-status`) — also a fallback for terminals without good Unicode.
+`·✓✗⚠→` glyphs for a plain `sethu:` prefix + comma-separated words (e.g. `sethu: [cwd],
+exit 0, $ git status`) — also a fallback for terminals without good Unicode.
 </details>
 
 <details>

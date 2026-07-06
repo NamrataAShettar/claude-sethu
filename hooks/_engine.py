@@ -140,13 +140,15 @@ def _header(mode, trust_on, mark_status, cmd, on, plain=False):
     given a fake exit status. In plain mode: `sethu: [mode] [trust-on] [status] $ cmd`,
     space-separated, no glyphs."""
     if plain:
-        segs = ["sethu:", f"[{mode}]"]
+        # Comma-separated so the segments don't run together and a screen reader
+        # gets a natural pause between them ("cwd, trust on, exit 0, ...").
+        segs = [f"[{mode}]"]
         if trust_on:
-            segs.append("trust-on")
+            segs.append("trust on")
         if mark_status is not None:
             segs.append(mark_status)
         segs.append(f"$ {cmd}")
-        return " ".join(segs)
+        return "sethu: " + ", ".join(segs)
     segs = [_c(ICON, "icon", on), _c(f"[{mode}]", "tag", on)]
     if trust_on:
         segs.append(_c("⚠trust", "trust", on))

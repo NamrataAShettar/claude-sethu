@@ -565,21 +565,21 @@ class TestPlainMode(Base):
 
     def test_run_ok_header(self):
         self.assertEqual(self._first("true", allow=["true"]),
-                         "sethu: [cwd] exit 0 $ true")
+                         "sethu: [cwd], exit 0, $ true")
 
     def test_run_fail_header(self):
         self.assertEqual(self._first("false", allow=["false"]),
-                         "sethu: [cwd] exit 1 (failed) $ false")
+                         "sethu: [cwd], exit 1 (failed), $ false")
 
     def test_trust_tag_is_word(self):
         h = self._first("true", allow=["true"], trust=True)
-        self.assertEqual(h, "sethu: [cwd] trust-on exit 0 $ true")
+        self.assertEqual(h, "sethu: [cwd], trust on, exit 0, $ true")
         self.assertNotIn("⚠", h)
 
     def test_no_glyphs_anywhere(self):
         self.write(color=False, plain=True)
         b = self.proc("> git branch", sid="p")["block"]
-        self.assertTrue(b.startswith("sethu: [cwd] $ git branch\n"))
+        self.assertTrue(b.startswith("sethu: [cwd], $ git branch\n"))
         self.assertIn("  - Allow this tool:", b)          # plain bullet
         for g in ("|^=^|", "·", "✓", "✗", "⚠", "•", "→"):
             self.assertNotIn(g, b, g)
@@ -593,7 +593,7 @@ class TestPlainMode(Base):
     def test_pipe_note_leads_with_sethu(self):
         self.write(color=False, plain=True, allow=["echo"])
         r = self.proc(">> echo hi", sid="p")
-        self.assertTrue(r["note"].startswith("sethu: [cwd] exit 0 $ echo hi"))
+        self.assertTrue(r["note"].startswith("sethu: [cwd], exit 0, $ echo hi"))
         self.assertNotIn("|^=^|", r["note"])
 
     def test_env_var_enables_plain(self):
