@@ -1,17 +1,21 @@
-name: tests
+name: ci
 
 on:
   push:
     branches: [main]
     paths-ignore: ['**.md', 'LICENSE', '.gitignore']
-  # No paths-ignore on PRs: tests run on EVERY PR (even docs-only) so the `test` check
-  # always reports and can be a required status check in branch protection. Without this
-  # a docs-only PR would skip the check and, if it were required, block the merge forever.
-  # (Push to main still skips CI for doc-only changes, above.)
+  # PRs: no paths-ignore, so `test`/`lint` report on every PR (even docs-only) and can
+  # be required status checks. Each job is gated on draft state below, so while a PR is
+  # a draft the checks are skipped (no run per work-in-progress commit); they run when
+  # the PR is opened non-draft or marked "ready for review". A draft can't be merged
+  # anyway, so a required check being skipped in draft state never blocks anything.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
   test:
+    # Run on any push, and on a PR only when it is NOT a draft (ready for review).
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,3 +26,16 @@ jobs:
         run: python -m compileall -q hooks
       - name: Run tests
         run: python -m unittest discover -s tests -v
+
+  lint:
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Lint (ruff — pyflakes + essential pycodestyle; see ruff.toml)
+        run: ruff check hooks tests

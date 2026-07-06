@@ -1,0 +1,15 @@
+# Lint config for CI. This is a DEV-only tool; sethu itself ships zero dependencies.
+#
+# Ruff's default rules are what we want: pyflakes (F) catches the bugs that actually
+# break at runtime — undefined names, unused imports, f-strings with no placeholders —
+# plus the essential pycodestyle rules (E4/E7/E9) and syntax errors. We keep all of
+# those. `# noqa: E402` markers in the hooks are respected (deliberate late imports on
+# the perf-sensitive fast path).
+#
+# We ignore two *purely stylistic* rules the code uses on purpose:
+#   E702  compact `a; b` one-liners (argparse setup, test fixtures)
+#   E401  a single multi-import line
+# These are readability choices, not correctness issues. Tighten later if desired.
+
+[lint]
+ignore = ["E702", "E401"]
