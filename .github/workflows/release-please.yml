@@ -8,9 +8,17 @@ permissions:
   contents: write
   pull-requests: write
 
+# Never cancel a release mid-cut (cancel-in-progress: false).
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
 jobs:
   release-please:
+    # Don't run in forks — only this repo should cut releases.
+    if: github.repository == 'NamrataAShettar/claude-sethu'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: googleapis/release-please-action@v4
         with:

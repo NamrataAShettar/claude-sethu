@@ -4,24 +4,42 @@ on:
   push:
     branches: [main]
     paths-ignore: ['**.md', 'LICENSE', '.gitignore']
-  # PRs: no paths-ignore, so `test`/`lint` report on every PR (even docs-only) and can
-  # be required status checks. Each job is gated on draft state below, so while a PR is
-  # a draft the checks are skipped (no run per work-in-progress commit); they run when
-  # the PR is opened non-draft or marked "ready for review". A draft can't be merged
-  # anyway, so a required check being skipped in draft state never blocks anything.
+  # PRs: no paths-ignore, so `test`/`lint`/`version-sync` report on every PR (even
+  # docs-only) and can be required status checks. Each job is gated on draft state
+  # below, so while a PR is a draft the checks are skipped (no run per work-in-progress
+  # commit); they run when the PR is opened non-draft or marked "ready for review". A
+  # draft can't be merged anyway, so a required check skipped in draft state never blocks.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+
+# Least privilege: the default token is read-only. Jobs here only need to read the repo
+# (they run untrusted fork-PR code on a public repo, so no write scope).
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid re-pushes to a PR) so stale jobs
+# don't keep burning Actions minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     # Run on any push, and on a PR only when it is NOT a draft (ready for review).
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Test the supported floor (3.9) and a current release. "pure stdlib, runs on
+        # whatever python3 you have" is only true if CI checks the floor, not just latest.
+        python-version: ["3.9", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: ${{ matrix.python-version }}
       - name: Validate Python syntax
         run: python -m compileall -q hooks
       - name: Run tests
@@ -30,13 +48,15 @@ jobs:
   lint:
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      # Pin ruff: an unpinned ruff can add rules and redden a previously-green PR.
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff==0.15.20
       - name: Lint (ruff — pyflakes + essential pycodestyle; see ruff.toml)
         run: ruff check hooks tests
 
@@ -47,6 +67,7 @@ jobs:
   version-sync:
     if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: plugin.json / version.txt must match the release-please manifest

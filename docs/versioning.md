@@ -57,6 +57,7 @@ The prefix before the colon is what release-please reads:
 | `test:` | `test: cover the timeout path` | no release |
 | `refactor:` | `refactor: extract _pipe_segments` | no release |
 | `ci:` | `ci: cache pip` | no release |
+| `revert:` | `revert: the gating change from #42` | patch (records the revert) |
 
 Notes:
 
@@ -108,6 +109,28 @@ Practical implications:
   old keys must not crash (see the "fail safe on bad input" guideline).
 - **The tag and GitHub Release are the durable record**; the changelog entry is what a
   user reads before deciding to update.
+
+## Rolling back a bad release
+
+There is **no "yank."** Git distribution means a tag/commit you've published is durable,
+and some users may have already pulled it — you cannot un-ship it. So the recovery path
+is **forward-only**:
+
+1. **Land a fix fast.** Open a `fix:` PR (or `revert:` to undo the offending change), let
+   release-please cut a **higher patch** version, and merge that release. Updating users
+   move to the fixed version the normal way.
+2. **If it's severe** (broken install, data risk), you can additionally **delete the
+   GitHub *Release*** to hide its changelog entry and, if truly necessary, delete the
+   *tag* — but the commit is still on `main` and anyone who already pulled it keeps it, so
+   this only reduces visibility, it does not recall the code. The real fix is step 1.
+3. **Never hand-roll the version backwards** to "undo" (e.g. editing `plugin.json` to a
+   lower number). The `version-sync` check blocks it, and release-please would fight it
+   anyway — always go forward with a new patch.
+
+Because the model can't recall a release, the best rollback protection is **not shipping
+the bad release**: the CI gates (`test`, `lint`, `version-sync`) and the deliberate
+"merge the release PR" step are what keep bad versions from reaching users in the first
+place.
 
 ## What happens if my title has no known prefix?
 
