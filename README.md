@@ -98,7 +98,7 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --unallow "tool"` | remove a tool from the allowlist |
 | `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
 | `sethu --gated-list` | tools that run without asking (built-in + ones you allowed) |
-| `sethu --trust on` | ⚠ run **anything**, gate off (footgun) |
+| `sethu --trust on` | ⚠ run **anything**, gate off (no guardrails) |
 | `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
 | `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
@@ -145,7 +145,7 @@ source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
   Allowing `ls` does **not** allow `> ls; rm -rf ~`. (Metacharacters *inside
   quotes* are fine, so once `python3` is allowed, `> python3 -c "import os; print(1)"` works.)
 - **Trust is the one safety knob.** `sethu --trust on` turns the gate off and runs
-  anything, a real footgun. Off by default (= gated), warned loudly, shown as
+  anything with no guardrails at all. Off by default (= gated), warned loudly, shown as
   `⚠trust` while active.
 - **Gated is a safe *default*, not a sandbox.** You can always run anything via
   your terminal, `!`, `--allow`, or `--trust` — so it's a guardrail against
@@ -208,8 +208,8 @@ by sethu. Send `> cmd` when Claude is idle.
 why (e.g. `git`/`npm` can write or run other programs, so they're not in the default
 set). To permit it, `sethu --allow X` (the whole tool). If it's interactive (`vim`, a bare REPL), use
 `sethu --launch "X"` instead (allowlisting can't make those run). To drop the
-guardrails entirely and run anything, there's `sethu --trust on`, but it's a
-footgun, so prefer allowlisting the specific commands you actually want.
+guardrails entirely and run anything, there's `sethu --trust on`, but it's
+genuinely risky, so prefer allowlisting the specific commands you actually want.
 
 **"timed out after 20s."** Captured commands are capped under Claude Code's ~30s
 hook budget. Raise it a bit with `sethu --timeout`, or run long-lived commands

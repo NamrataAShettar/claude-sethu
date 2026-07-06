@@ -122,7 +122,7 @@ When you *want* the tokens spent because Claude should act on it:
 sethu                      # options menu
 sethu --allow git          sethu --gated-list
 sethu --mode shell         sethu --timeout 60
-sethu --trust on           # ⚠ run anything, gate off (footgun)
+sethu --trust on           # ⚠ run anything, gate off (no guardrails)
 sethu --runner             # show config
 ```
 

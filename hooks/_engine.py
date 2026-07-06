@@ -1081,7 +1081,7 @@ def process(prompt, data):
             bullets.append(f'  • Allow this tool:     sethu --allow "{tool}"')
         bullets += [
             f'  • Open in a terminal:  sethu --launch "{cmd}"',
-            f"  • Run everything:      sethu --trust on   (footgun)",
+            f"  • Run everything:      sethu --trust on   (no guardrails)",
             f"  • See what's gated:    sethu --gated-list",
         ]
         return {"block": _reply(mode, trust_on, cmd, reason + "\n" + "\n".join(bullets), on)}
@@ -1161,7 +1161,7 @@ Let a command run (gated tools like ls / cat / grep / jq run already):
   sethu --allow "tool"     permit a whole tool, any flags (e.g. git, find); undo: --unallow
   sethu --launch "cmd"     interactive (vim/top/ssh) or long-running: opens a terminal (undo: --unlaunch)
   sethu --gated-list       tools that run without asking (built-in + ones you allowed)
-  sethu --trust on         run ANY `>` command, gate off (footgun)
+  sethu --trust on         run ANY `>` command, gate off (no guardrails)
 
 How commands run:
   sethu --mode {'|'.join(MODES)}   default cwd; shell makes cd/export/venv persist
@@ -1229,7 +1229,7 @@ def gated_list_text(cfg):
         f"{names}"
         f"{yours}\n\n"
         "Anything else needs `sethu --allow \"<tool>\"` (permits that whole tool), or "
-        "`sethu --trust on` to run everything (footgun)."
+        "`sethu --trust on` to run everything (no guardrails)."
     )
 
 
@@ -1359,7 +1359,7 @@ def main(argv=None):
     p.add_argument("--gated-list", action="store_true", dest="gated_list",
                    help="list the tools that run without asking: built-in defaults + ones you've --allow'd")
     p.add_argument("--trust", choices=["on", "off"],
-                   help="off (default) = gated; on = run ANY command, gate off (footgun)")
+                   help="off (default) = gated; on = run ANY command, gate off (no guardrails)")
     p.add_argument("--rc", choices=["on", "off"],
                    help="in shell mode, source your shell rc (aliases/functions/env)")
     p.add_argument("--color", choices=["on", "off"],
