@@ -132,6 +132,21 @@ def _msg(text, on, plain=False):
     return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
 
 
+def _style_cli(text, on, plain):
+    """Style the management CLI's captured stdout (help / `--runner` / `✔` feedback). It's
+    all sethu's own text (no command output), so its glyphs are swapped for words (plain)
+    or colored (`✔`/`⚠`) here, instead of threading on/plain through every print. The
+    leading `sethu:`/icon is added by the hook's `_lead`, not here."""
+    if plain:
+        for a, b in (("✔ ", "done: "), ("⚠ ", "warning: "), ("• ", "- "),
+                     ("→ ", "-> "), ("↗ ", ""), ("✔", "done:"), ("⚠", "")):
+            text = text.replace(a, b)
+        return text
+    if not on:
+        return text
+    return text.replace("✔", _c("✔", "ok", on)).replace("⚠", _c("⚠", "warn", on))
+
+
 def _header(mode, trust_on, mark_status, cmd, on, plain=False):
     """The unified header:  |^=^| · [mode] [⚠trust] · [status ·] $ cmd
     Every part is dim-`·`-separated. `mark_status` is the `✓ exit 0`-style string for a
@@ -995,9 +1010,10 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
 
 
 # ── the core: process one submitted prompt ────────────────────────────────────
-HELP = ("sethu: type `> <command>` to run an allowlisted command (free), or "
+# No leading icon/`sethu:` — the hook's `_lead` adds it (colored, or `sethu:` in plain).
+HELP = ("type `> <command>` to run it (free — gated tools like ls/cat/grep run now), or "
         "`>> <command>` to also send its output to Claude.\n"
-        "Manage it: `sethu --allow \"<cmd>\"`, `sethu --mode cwd|shell|stateless`, "
+        "Manage it: `sethu --allow \"<tool>\"`, `sethu --mode cwd|shell|stateless`, "
         "`sethu --runner`.")
 
 
@@ -1191,7 +1207,8 @@ def process(prompt, data):
 # ── management CLI ─────────────────────────────────────────────────────────────
 def help_text():
     cfg = load_config()
-    return f"""{ICON} · sethu: run terminal commands from Claude's prompt box (no `!` needed).
+    # No leading icon/`sethu:` — the hook's `_lead` adds it (colored, or `sethu:` in plain).
+    return f"""run terminal commands from Claude's prompt box (no `!` needed).
 
   > cmd      run it, show the output to YOU only. Free (Claude never sees it).
   >> cmd     run it AND send the output to Claude (this costs tokens).
@@ -1475,7 +1492,7 @@ def _print_config(cfg):
     """Pretty-print the effective config (the `sethu` / `--runner` view)."""
     trust_disp = "ON ⚠ gate off — everything runs" if cfg.get("trust") else "off (gated)"
     ml = max_lines(cfg)
-    print(f"sethu config ({config_path()}):")
+    print(f"config ({config_path()}):")   # the `sethu:`/icon lead is added by `_lead`
     print(f"  prefix:   {cfg['prefix']!r}   (default '>'; > run+block free, >> send to Claude)")
     print(f"  mode:     {cfg['mode']}   (default cwd; one of: {', '.join(MODES)})")
     print(f"  trust:    {trust_disp}   (default off; off = gated safe tools + your --allow'd)")

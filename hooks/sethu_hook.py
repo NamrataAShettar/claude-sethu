@@ -76,7 +76,7 @@ def main():
     # It's (probably) for sethu — now pay for the heavier imports.
     sys.path.insert(0, HERE)
     from _engine import (process, SUBCOMMANDS, ICON,  # noqa: E402
-                         _c, _color_on, _plain_on, load_config)
+                         _c, _color_on, _plain_on, _style_cli, load_config)
 
     cfg = load_config()
     on = _color_on(cfg)
@@ -112,7 +112,10 @@ def main():
                 [sys.executable, ENGINE, *argv],
                 capture_output=True, text=True, timeout=15,
             )
-            text = (run.stdout or "") + (("\n" + run.stderr) if run.stderr else "")
+            # stdout is plain CLI text → style its glyphs (color/plain); stderr is the
+            # branded _Parser.error output, already styled, so leave it as-is.
+            out = _style_cli(run.stdout or "", on, plain)
+            text = out + (("\n" + run.stderr) if run.stderr else "")
         except Exception as e:
             text = f"sethu error: {e}"
         _block(_lead(text.strip() or "(no output)"))

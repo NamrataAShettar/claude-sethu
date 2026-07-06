@@ -597,6 +597,27 @@ class TestBugBash2(Base):
         # M-4: ag dropped from GATED (--pager exec vector unverifiable).
         self.assertNotIn("ag", _engine.GATED)
 
+    def test_cli_output_has_no_embedded_lead(self):
+        # M-1: help/menu must NOT embed the icon or `sethu:` — the hook's `_lead`
+        # supplies it (colored, or `sethu:` in plain), so the menu icon gets colored.
+        self.assertNotIn(_engine.ICON, _engine.HELP)
+        self.assertNotIn(_engine.ICON, _engine.help_text())
+        self.assertFalse(_engine.help_text().startswith("sethu:"))
+
+    def test_style_cli_plain_swaps_glyphs(self):
+        # M-1: plain mode swaps CLI glyphs for words.
+        out = _engine._style_cli("✔ added\n  ⚠ careful\n  • item", on=False, plain=True)
+        self.assertNotIn("✔", out)
+        self.assertNotIn("⚠", out)
+        self.assertNotIn("•", out)
+        self.assertIn("done:", out)
+        self.assertIn("warning:", out)
+
+    def test_style_cli_colors_markers(self):
+        # M-1: in color mode the ✔/⚠ markers get ANSI (so CLI feedback isn't monochrome).
+        out = _engine._style_cli("✔ added", on=True, plain=False)
+        self.assertIn("\033[", out)
+
 
 class TestPlainMode(Base):
     """Plain/spoken mode: `sethu:` prefix + words, no |^=^| / glyph ornaments."""
