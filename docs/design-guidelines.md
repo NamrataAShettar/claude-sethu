@@ -27,6 +27,13 @@ with one, either don't make it or update this doc deliberately.
   `⚠trust`. No green/red pairing. Differentiate with **weight or separators, not
   new hues** — every added color costs scannability. If tempted to add a color,
   don't.
+- **Nothing is color- or glyph-only; a screen reader gets the full meaning.** Every
+  distinguishing fact is also words (`✓ exit 0`, refusals omit the status slot,
+  `[cwd]`, `⚠trust`), and `NO_COLOR`/`--color off` never drops information. For screen
+  readers the `|^=^|` icon + `·✓✗⚠→•` glyphs are noise, so **`--plain on`/`SETHU_PLAIN`
+  (`_plain_on`)** swaps them for a `sethu:` prefix + words — threaded as a `plain` arg
+  through `_header`/`_msg`/`_reply` (and the status/cd/bullet/truncation builders), NOT
+  by string-replacing the final output (that would mangle a command's own glyphs).
 - **Color = sethu's *interpretation*; plain = *relayed* content.** Color the things
   sethu understands and gives meaning to (exit status, mode, warnings). Never
   recolor the command's own output — it's data sethu just carries. (But do append a

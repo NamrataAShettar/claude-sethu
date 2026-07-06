@@ -76,18 +76,23 @@ def main():
     # It's (probably) for sethu — now pay for the heavier imports.
     sys.path.insert(0, HERE)
     from _engine import (process, SUBCOMMANDS, ICON,  # noqa: E402
-                         _c, _color_on, load_config)
+                         _c, _color_on, _plain_on, load_config)
 
-    on = _color_on(load_config())
+    cfg = load_config()
+    on = _color_on(cfg)
+    plain = _plain_on(cfg)
 
     def _lead(text):
         """The ONE guarantee that every sethu response the user sees opens with the
-        |^=^| icon + `·` separator, so it's instantly recognizable as sethu (not
-        their own shell or Claude). Skips when the text already leads with the icon
-        (a header/help/error already embeds it), so it's never doubled. Every
+        `|^=^|` icon (or `sethu:` in plain mode), so it's instantly recognizable as
+        sethu (not their own shell or Claude). Skips when the text already leads with
+        that (a header/help/error already embeds it), so it's never doubled. Every
         user-facing emission below routes through this."""
-        if ICON in text.split("\n", 1)[0]:
+        first = text.split("\n", 1)[0]
+        if ICON in first or (plain and first.startswith("sethu:")):
             return text
+        if plain:
+            return f"sethu: {text}"
         return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
 
     # `sethu …` → run the management CLI locally, block the model.

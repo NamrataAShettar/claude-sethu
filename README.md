@@ -101,6 +101,7 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --trust on` | ⚠ run **anything**, gate off (no guardrails) |
 | `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
 | `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
+| `sethu --plain on` | `sethu:` prefix + words instead of `\|^=^\|`/glyphs (screen readers) |
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
 | `sethu --timeout 60` | give commands up to 60s |
 | `sethu --runner` | show the current config (with defaults) |
@@ -220,6 +221,16 @@ Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/iss
 ---
 
 ## 🧩 Extras
+
+<details>
+<summary>Accessibility (screen readers, plain terminals)</summary>
+
+The header is colorblind-safe (Okabe-Ito) and never color-only — status, mode, and
+warnings are always words, so a screen reader gets the full meaning; `NO_COLOR` drops
+color. For readers, **`sethu --plain on`** (or `SETHU_PLAIN`) swaps the `|^=^|` icon and
+`·✓✗⚠→` glyphs for a plain `sethu:` prefix + comma-separated words (e.g. `sethu: [cwd],
+exit 0, $ git status`) — also a fallback for terminals without good Unicode.
+</details>
 
 <details>
 <summary>Long output &amp; temp files</summary>

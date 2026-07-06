@@ -56,7 +56,7 @@ MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024   # 8 MiB
 
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
-            "trust": False, "rc": False, "color": True,
+            "trust": False, "rc": False, "color": True, "plain": False,
             "maxLines": MAX_LINES, "timeout": CMD_TIMEOUT}
 # Note: there is no `readonly` key any more. sethu is "gated" by default (only the
 # GATED tool set + your --allow'd tools run); `trust: True` ungates everything. An
@@ -113,21 +113,42 @@ def _color_on(cfg):
     return bool(cfg.get("color", True)) and not os.environ.get("NO_COLOR")
 
 
+def _plain_on(cfg):
+    """Plain/spoken mode: swap the `|^=^|` icon + glyph ornaments (`·✓✗⚠→•…`) for a
+    `sethu:` prefix and words, so a screen reader isn't read "pipe caret equals caret
+    pipe, middle dot" on every line. Also a Unicode-mojibake fallback. Presentation
+    only (no permission effect), so an env var is safe. Separate from color."""
+    return bool(cfg.get("plain")) or bool(os.environ.get("SETHU_PLAIN"))
+
+
 def _c(text, key, on):
     return f"\033[{_ANSI[key]}m{text}\033[0m" if on else text
 
 
-def _msg(text, on):
-    """A standalone sethu message with no command context (bare `>` help), prefixed
-    with the |^=^| icon + dim separator."""
+def _msg(text, on, plain=False):
+    """A standalone sethu message with no command context (bare `>` help)."""
+    if plain:
+        return f"sethu: {text}"
     return f"{_c(ICON, 'icon', on)} {_c('·', 'dim', on)} {text}"
 
 
-def _header(mode, trust_on, mark_status, cmd, on):
+def _header(mode, trust_on, mark_status, cmd, on, plain=False):
     """The unified header:  |^=^| · [mode] [⚠trust] · [status ·] $ cmd
-    Every part is dim-`·`-separated. `mark_status` is the coloured `✓ exit 0`-style
-    string for a RUN, or None for a message that never ran (refusal/cd/interactive):
-    then the status slot is omitted, so a non-run is never given a fake exit status."""
+    Every part is dim-`·`-separated. `mark_status` is the `✓ exit 0`-style string for a
+    RUN (coloured, or plain words), or None for a message that never ran
+    (refusal/cd/interactive): then the status slot is omitted, so a non-run is never
+    given a fake exit status. In plain mode: `sethu: [mode] [trust-on] [status] $ cmd`,
+    space-separated, no glyphs."""
+    if plain:
+        # Comma-separated so the segments don't run together and a screen reader
+        # gets a natural pause between them ("cwd, trust on, exit 0, ...").
+        segs = [f"[{mode}]"]
+        if trust_on:
+            segs.append("trust on")
+        if mark_status is not None:
+            segs.append(mark_status)
+        segs.append(f"$ {cmd}")
+        return "sethu: " + ", ".join(segs)
     segs = [_c(ICON, "icon", on), _c(f"[{mode}]", "tag", on)]
     if trust_on:
         segs.append(_c("⚠trust", "trust", on))
@@ -137,10 +158,10 @@ def _header(mode, trust_on, mark_status, cmd, on):
     return f" {_c('·', 'dim', on)} ".join(segs)
 
 
-def _reply(mode, trust_on, cmd, body, on):
+def _reply(mode, trust_on, cmd, body, on, plain=False):
     """A non-run response: the unified header (no status) + `body` on the next line.
     The command lives in the header, so `body` shouldn't re-echo it."""
-    return _header(mode, trust_on, None, cmd, on) + "\n" + body
+    return _header(mode, trust_on, None, cmd, on, plain) + "\n" + body
 
 
 def _output_path(sid):
@@ -203,7 +224,7 @@ def _sweep_temp(now, force=False):
             pass
 
 
-def _truncate(out, sid, cap, on):
+def _truncate(out, sid, cap, on, plain=False):
     """If `out` exceeds `cap` lines, keep the first `cap` and write the full text
     to the per-session file, returning (display, note). Otherwise return
     (out, ""). `cap` <= 0 disables truncation. `note` is a short pointer at the
@@ -231,7 +252,8 @@ def _truncate(out, sid, cap, on):
     shown = "\n".join(head[:cap])
     where = (f"full output: {path}  (open it, or `sethu --launch \"less {path}\"`)"
              if path else "full output unavailable (couldn't write temp file)")
-    note = f"… {hidden} more line{'s' if hidden != 1 else ''} truncated · {where}"
+    lead, sep = ("...", "-") if plain else ("…", "·")
+    note = f"{lead} {hidden} more line{'s' if hidden != 1 else ''} truncated {sep} {where}"
     return shown, note
 
 
@@ -251,7 +273,8 @@ FIRST_RUN_HINT = (
     "• `>> grep -n TODO src/` → runs it AND sends the output to Claude (costs tokens).\n"
     "Works when Claude is idle (a `>` typed while Claude is thinking goes to the "
     "model). Safe tools (ls/cat/grep/jq…) work now; for git/find/npm/… run "
-    "`sethu --allow <tool>` once. Type `sethu` for the menu."
+    "`sethu --allow <tool>` once. Type `sethu` for the menu. Screen reader? Please use "
+    "`sethu --plain on` for spoken-friendly output."
 )
 
 
@@ -276,7 +299,11 @@ def first_run_hint():
         # Can't record that we showed it → skip, so a read-only config dir doesn't
         # get the "once per machine" hint on every single session.
         return None
-    return {"systemMessage": FIRST_RUN_HINT}
+    hint = FIRST_RUN_HINT
+    if _plain_on(load_config()):   # spoken/plain: swap the icon + glyphs for words
+        hint = (hint.replace(f"{ICON} · ", "sethu: ")
+                    .replace("• ", "- ").replace(" → ", " -> "))
+    return {"systemMessage": hint}
 
 
 def _type_ok(default, v):
@@ -1006,6 +1033,7 @@ def process(prompt, data):
     if not prefix or not stripped.startswith(prefix):
         return {"passthrough": True}
     on = _color_on(cfg)  # every sethu message below carries the |^=^| icon
+    plain = _plain_on(cfg)  # …or a `sethu:` prefix + words, for screen readers
 
     # Opportunistically clear sethu's own stale temp files (saved output, launch
     # scripts) so storage doesn't bloat. Cheap, best-effort, only on our prompts.
@@ -1017,7 +1045,7 @@ def process(prompt, data):
     pipe = stripped.startswith(prefix * 2)
     cmd = stripped[len(prefix) * (2 if pipe else 1):].strip()
     if not cmd:
-        return {"block": _msg(HELP, on)}
+        return {"block": _msg(HELP, on, plain)}
 
     mode = cfg.get("mode", "cwd")
     # One safety knob: trust off (default) = gated, trust on = everything runs.
@@ -1028,7 +1056,8 @@ def process(prompt, data):
     if _matches(cmd, cfg["launch"]):
         status = launch_in_terminal(cmd)
         return {"block": _reply(mode, trust_on, cmd,
-                status or "couldn't open a terminal, run it in your own terminal.", on)}
+                status or "couldn't open a terminal, run it in your own terminal.",
+                on, plain)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
     # Only a *bare* cd is exempt — a chained `cd x; …` is not, so it can't smuggle
@@ -1038,12 +1067,13 @@ def process(prompt, data):
             target = resolve_cd(cmd[2:], base)
             if os.path.isdir(target):
                 set_cwd(sid, target)
-                return {"block": _reply(mode, trust_on, cmd, f"→ {target}", on)}
+                echo = f"now in {target}" if plain else f"→ {target}"
+                return {"block": _reply(mode, trust_on, cmd, echo, on, plain)}
             return {"block": _reply(mode, trust_on, cmd,
-                    f"cd: not a directory: {target}", on)}
+                    f"cd: not a directory: {target}", on, plain)}
         return {"block": _reply(mode, trust_on, cmd,
                 "stateless mode: cd doesn't persist. Use an inline path "
-                "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`).", on)}
+                "(`> ls ..`), or switch: `sethu --mode cwd` (or `shell`).", on, plain)}
 
     # Interactive programs would hang the captured runner (no terminal), and
     # --allow can't change that. Checked BEFORE the allow gate so an interactive
@@ -1052,7 +1082,7 @@ def process(prompt, data):
         return {"block": _reply(mode, trust_on, cmd,
                 "this is interactive and needs a real terminal, so the runner can't "
                 "capture it (it would hang). Allowlisting won't help. Open it in a "
-                f"terminal instead:\n  sethu --launch \"{cmd}\"", on)}
+                f"terminal instead:\n  sethu --launch \"{cmd}\"", on, plain)}
 
     # State-setting builtins (export/alias/unset) auto-run without --allow — they
     # only set shell state, no external code (chain-guarded). But they only persist
@@ -1066,7 +1096,7 @@ def process(prompt, data):
                 f"`{prog}` sets shell state, but in `{mode}` mode each command runs in a "
                 f"fresh shell so it wouldn't persist. Keep it by switching to shell mode: "
                 f"`sethu --mode shell` (add `sethu --rc on` for your aliases/functions).",
-                on)}
+                on, plain)}
 
     allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or is_gated(cmd)
     if not _is_bare_cd(cmd) and not allowed:
@@ -1076,15 +1106,17 @@ def process(prompt, data):
         reason = _why_refused(cmd, cfg) or ("sethu doesn't run this automatically — "
             "part of it can change files or run other programs.")
         tool = os.path.basename(prog) if prog else cmd
+        b = "-" if plain else "•"
         bullets = []
         if not _DANGER.search(cmd):
-            bullets.append(f'  • Allow this tool:     sethu --allow "{tool}"')
+            bullets.append(f'  {b} Allow this tool:     sethu --allow "{tool}"')
         bullets += [
-            f'  • Open in a terminal:  sethu --launch "{cmd}"',
-            f"  • Run everything:      sethu --trust on   (no guardrails)",
-            f"  • See what's gated:    sethu --gated-list",
+            f'  {b} Open in a terminal:  sethu --launch "{cmd}"',
+            f"  {b} Run everything:      sethu --trust on   (no guardrails)",
+            f"  {b} See what's gated:    sethu --gated-list",
         ]
-        return {"block": _reply(mode, trust_on, cmd, reason + "\n" + "\n".join(bullets), on)}
+        return {"block": _reply(mode, trust_on, cmd, reason + "\n" + "\n".join(bullets),
+                on, plain)}
 
     t = cmd_timeout(cfg)
     if mode == "shell":
@@ -1099,14 +1131,17 @@ def process(prompt, data):
     # Each part is colored distinctly (colorblind-safe) so the status, command,
     # and output read apart at a glance. (`on` was computed near the top.)
     state = "ok" if code == 0 else ("fail" if code is not None else "warn")
-    mark = {"ok": "✓", "fail": "✗", "warn": "⚠"}[state]
     status = f"exit {code}" if code is not None else "no exit code"
-    mark_status = _c(f"{mark} {status}", state, on)
-    header = _header(mode, trust_on, mark_status, cmd, on)
+    if plain:
+        mark_status = f"exit {code} (failed)" if state == "fail" else status
+    else:
+        mark = {"ok": "✓", "fail": "✗", "warn": "⚠"}[state]
+        mark_status = _c(f"{mark} {status}", state, on)
+    header = _header(mode, trust_on, mark_status, cmd, on, plain)
 
     # Cap long output so it doesn't flood the chat (`>`) or burn tokens (`>>`).
     # The full text is written to a per-session file; the note points at it.
-    shown, note = _truncate(out, sid, max_lines(cfg), on)
+    shown, note = _truncate(out, sid, max_lines(cfg), on, plain)
 
     if pipe:
         # Fence + label the output as untrusted DATA, not instructions — it may
@@ -1135,9 +1170,9 @@ def process(prompt, data):
         # times out (never a clean exit 0) — so gate on that to avoid a false positive
         # when a command legitimately prints those bytes and succeeds. Point at a real
         # terminal.
-        hint = _c(f"⚠ that looks like a full-screen program, captured output "
-                  f"garbles. Run it in a real terminal: sethu --launch \"{cmd}\"",
-                  "warn", on)
+        warn_txt = (f"that looks like a full-screen program, captured output "
+                    f"garbles. Run it in a real terminal: sethu --launch \"{cmd}\"")
+        hint = ("warning: " + warn_txt) if plain else _c("⚠ " + warn_txt, "warn", on)
         body = f"{header}\n{hint}\n{shown}"
     if note:
         body += "\n" + _c(note, "dim", on)
@@ -1171,6 +1206,7 @@ How commands run:
   sethu --maxlines 40      cap long output (0 = unlimited)
   sethu --prefix ">"       change the trigger
   sethu --color off        plain result header (or NO_COLOR=1)
+  sethu --plain on         `sethu:` prefix + words, no glyphs (screen readers)
 
   sethu --runner           show the full config with defaults
 
@@ -1180,8 +1216,8 @@ Config: {config_path()}   now: mode={cfg['mode']}, trust={'on' if cfg.get('trust
 
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch",
-               "trust", "rc", "color", "maxlines", "timeout", "prefix", "restart",
-               "runner", "show", "help"}
+               "trust", "rc", "color", "plain", "maxlines", "timeout", "prefix",
+               "restart", "runner", "show", "help"}
 
 
 def normalize_argv(argv):
@@ -1297,6 +1333,11 @@ def _apply_cli_mutations(a, cfg):
         cfg["color"] = (a.color == "on")
         print(f"✔ color: {a.color}")
         changed = True
+    if a.plain:
+        cfg["plain"] = (a.plain == "on")
+        print(f"✔ plain: {a.plain} (`sethu:` prefix + words, no glyphs — for screen "
+              f"readers / plain terminals)")
+        changed = True
     if a.maxlines is not None:
         cfg["maxLines"] = max(0, a.maxlines)
         disp = "unlimited" if cfg["maxLines"] == 0 else f"{cfg['maxLines']} lines"
@@ -1364,6 +1405,9 @@ def main(argv=None):
                    help="in shell mode, source your shell rc (aliases/functions/env)")
     p.add_argument("--color", choices=["on", "off"],
                    help="color the result header (default on; NO_COLOR also disables)")
+    p.add_argument("--plain", choices=["on", "off"],
+                   help="plain/spoken output: `sethu:` prefix + words, no |^=^|/glyphs "
+                        "(for screen readers or plain terminals; SETHU_PLAIN also enables)")
     p.add_argument("--maxlines", metavar="N", type=int,
                    help="truncate output beyond N lines (full output saved to a file); 0 = unlimited")
     p.add_argument("--timeout", metavar="SECONDS", type=int,
@@ -1417,6 +1461,7 @@ def _print_config(cfg):
     print(f"  trust:    {trust_disp}   (default off; off = gated safe tools + your --allow'd)")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (default off; shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (default on; colored result header)")
+    print(f"  plain:    {'on' if cfg.get('plain') else 'off'}   (default off; `sethu:` prefix + words, no glyphs — for screen readers)")
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (default 40; truncate long output, full saved to a file)")
     print(f"  timeout:  {cmd_timeout(cfg)}s   (default 20s; max seconds a command may run)")
     print(f"  allow:    {cfg['allow']}   (gated tools + these run; `--gated-list` to see all)")
