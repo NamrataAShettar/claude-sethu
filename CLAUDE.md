@@ -33,7 +33,9 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
     `_timeout_msg` (talks to `_shelld.py`).
   - *the core: process one submitted prompt* — `process()` (the one entry that returns
     `{passthrough|block|context}`), plus the header/color helpers `_header`, `_reply`,
-    `_msg`, `_c`, `_ANSI`, `ICON`.
+    `_msg`, `_c`, `_color_on`, `_plain_on` (plain/spoken mode: `sethu:` prefix + words,
+    no `|^=^|`/glyphs — threaded as a `plain` arg through the render helpers), `_ANSI`,
+    `ICON`.
   - *management CLI* — `main` (wraps the read-modify-write in `_config_lock`),
     `_apply_cli_mutations` (the per-flag config mutations, run under the lock;
     `_announce_launch` opens a terminal AFTER the lock), `normalize_argv`

@@ -26,6 +26,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --rc on/off (+ aliases actually work)  TestConfig, TestRcAliases              [x]
   state builtins auto-run; source gated  TestStateBuiltinHint                   [x]
   --color on/off                         TestColor, TestConfig                  [x]
+  --plain on/off (spoken/screen-reader)  TestPlainMode                          [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
   --prefix (custom trigger)              TestCustomPrefix, TestConfig,          [x]
@@ -553,6 +554,67 @@ class TestRefusalMessages(Base):
         self.write(color=False)
         self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
         self.assertIn('--allow "npm"', self.proc("> npm test")["block"])
+
+
+class TestPlainMode(Base):
+    """Plain/spoken mode: `sethu:` prefix + words, no |^=^| / glyph ornaments."""
+
+    def _first(self, cmd, sid="p", **kw):
+        self.write(color=False, plain=True, **kw)
+        return self.proc("> " + cmd, sid=sid)["block"].split("\n")[0]
+
+    def test_run_ok_header(self):
+        self.assertEqual(self._first("true", allow=["true"]),
+                         "sethu: [cwd] exit 0 $ true")
+
+    def test_run_fail_header(self):
+        self.assertEqual(self._first("false", allow=["false"]),
+                         "sethu: [cwd] exit 1 (failed) $ false")
+
+    def test_trust_tag_is_word(self):
+        h = self._first("true", allow=["true"], trust=True)
+        self.assertEqual(h, "sethu: [cwd] trust-on exit 0 $ true")
+        self.assertNotIn("⚠", h)
+
+    def test_no_glyphs_anywhere(self):
+        self.write(color=False, plain=True)
+        b = self.proc("> git branch", sid="p")["block"]
+        self.assertTrue(b.startswith("sethu: [cwd] $ git branch\n"))
+        self.assertIn("  - Allow this tool:", b)          # plain bullet
+        for g in ("|^=^|", "·", "✓", "✗", "⚠", "•", "→"):
+            self.assertNotIn(g, b, g)
+
+    def test_cd_echo_is_words(self):
+        self.write(color=False, plain=True, mode="cwd")
+        b = self.proc("> cd /", sid="p")["block"]
+        self.assertIn("now in /", b)
+        self.assertNotIn("→", b)
+
+    def test_pipe_note_leads_with_sethu(self):
+        self.write(color=False, plain=True, allow=["echo"])
+        r = self.proc(">> echo hi", sid="p")
+        self.assertTrue(r["note"].startswith("sethu: [cwd] exit 0 $ echo hi"))
+        self.assertNotIn("|^=^|", r["note"])
+
+    def test_env_var_enables_plain(self):
+        self.write(color=False, allow=["true"])   # plain OFF in config
+        os.environ["SETHU_PLAIN"] = "1"
+        try:
+            self.assertTrue(self.proc("> true", sid="p")["block"].startswith("sethu:"))
+        finally:
+            os.environ.pop("SETHU_PLAIN", None)
+
+    def test_cli_toggle_persists(self):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                _engine.main(["--plain", "on"])
+            except SystemExit:
+                pass
+        self.assertTrue(_engine.load_config()["plain"])
+        self.assertIn("plain: on", buf.getvalue())
 
 
 class TestTrust(Base):
