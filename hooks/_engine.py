@@ -452,11 +452,13 @@ def _is_chain_unsafe(cmd):
 
 def _matches(cmd, entries):
     cmd = cmd.strip()
-    unsafe = _is_chain_unsafe(cmd)
+    # A chained/piped/substituted command NEVER matches the allowlist — not even an
+    # exact stored entry. The allowlist is for tools, not chains; chains run only under
+    # --trust. (Without this, `--allow "ls; rm"` then `> ls; rm` would run the chain.)
+    if _is_chain_unsafe(cmd):
+        return False
     for e in entries:
-        if cmd == e:
-            return True
-        if cmd.startswith(e + " ") and not unsafe:
+        if cmd == e or cmd.startswith(e + " "):
             return True
     return False
 
@@ -623,7 +625,7 @@ def is_interactive(cmd):
 GATED = {
     "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "stat",
     "which", "type", "date", "whoami", "id", "uname", "hostname", "uptime",
-    "df", "du", "ps", "printenv", "grep", "egrep", "fgrep", "ag", "cut", "tr",
+    "df", "du", "ps", "printenv", "grep", "egrep", "fgrep", "cut", "tr",
     "column", "jq", "basename", "dirname", "realpath", "readlink", "nl", "tac",
     "comm", "diff", "cmp", "shasum", "md5", "sha256sum", "cksum", "hexdump",
     "strings", "cal", "look", "fold", "fmt", "rev",
@@ -1054,10 +1056,10 @@ def process(prompt, data):
     base = get_cwd(sid, data.get("cwd"))
 
     if _matches(cmd, cfg["launch"]):
-        status = launch_in_terminal(cmd)
-        return {"block": _reply(mode, trust_on, cmd,
-                status or "couldn't open a terminal, run it in your own terminal.",
-                on, plain)}
+        status = launch_in_terminal(cmd) or "couldn't open a terminal, run it in your own terminal."
+        if plain:
+            status = status.replace("↗ ", "")   # no glyphs in plain mode
+        return {"block": _reply(mode, trust_on, cmd, status, on, plain)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
     # Only a *bare* cd is exempt — a chained `cd x; …` is not, so it can't smuggle
@@ -1085,10 +1087,12 @@ def process(prompt, data):
                 f"terminal instead:\n  sethu --launch \"{cmd}\"", on, plain)}
 
     # State-setting builtins (export/alias/unset) auto-run without --allow — they
-    # only set shell state, no external code (chain-guarded). But they only persist
-    # in shell mode; in cwd/stateless each command is a throwaway subprocess, so
-    # instead of running a no-op we say it won't persist. (source/. are NOT here —
-    # they execute a file's contents, so they need --allow; see _why_refused.)
+    # execute no external code THEMSELVES (chain-guarded). Note they can still change
+    # what LATER commands resolve to (e.g. `export PATH=…`, `alias ls=…`) — that's the
+    # user shaping their own shell, same as any terminal, not a sethu escalation. They
+    # only persist in shell mode; in cwd/stateless each command is a throwaway
+    # subprocess, so instead of running a no-op we say it won't persist. (source/. are
+    # NOT here — they execute a file's contents, so they need --allow; see _why_refused.)
     prog = cmd.split()[0] if cmd.split() else ""
     safe_builtin = prog in _SAFE_STATE_BUILTINS and not _is_chain_unsafe(cmd)
     if safe_builtin and mode != "shell":
@@ -1285,6 +1289,12 @@ def _apply_cli_mutations(a, cfg):
         val = " ".join(a.allow.split())
         if not val:
             print("nothing to allow (the command was empty)."); noop = True
+        elif _is_chain_unsafe(val):
+            t = os.path.basename(val.split()[0]) if val.split() else "<tool>"
+            print(f"won't allowlist a chain: {val!r}. sethu allows tools, not chained "
+                  f"commands — allow the tools individually (e.g. `sethu --allow {t}`) "
+                  f"and run the parts as separate `>` commands, or `sethu --trust on` to "
+                  f"run everything."); noop = True
         elif val in cfg["allow"]:
             print(f"already allowed: {val!r} (no change)."); noop = True
         else:
@@ -1359,6 +1369,14 @@ def _apply_cli_mutations(a, cfg):
         else:
             print("✔ trust: off — gated again (only safe tools + your --allow'd run).")
         changed = True
+    if a.rc:
+        cfg["rc"] = (a.rc == "on")
+        killed = kill_daemons()  # restart so the new shell takes effect
+        note = f" (restarted {killed} shell daemon(s))" if killed else " (shell restarted)"
+        extra = (" — your shell's aliases/functions/env now load in shell mode"
+                 if cfg["rc"] else "")
+        print(f"✔ rc: {a.rc}{note}{extra}")
+        changed = True
     return changed, noop, launch_val
 
 
@@ -1423,16 +1441,9 @@ def main(argv=None):
     if a.restart:
         print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
         return
-    if a.rc:
-        with _config_lock():
-            cfg = load_config()
-            cfg["rc"] = (a.rc == "on")
-            save_config(cfg)
-        kill_daemons()  # restart so the new shell takes effect
-        extra = (" — your shell's aliases/functions/env now load in shell mode"
-                 if cfg["rc"] else "")
-        print(f"✔ rc: {a.rc} (shell restarted){extra}")
-        return
+    # --rc is a config mutation (bool + daemon restart), so it goes through the normal
+    # mutation block below — NOT an early return — otherwise `--rc on --mode shell` would
+    # silently drop the --mode.
 
     # Serialize the read-modify-write so two concurrent `sethu --…` writers don't
     # clobber each other (race A3); load happens INSIDE the lock so we mutate the
