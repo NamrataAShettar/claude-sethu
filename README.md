@@ -1,18 +1,20 @@
 # `|^=^|` sethu: a bridge between Claude Code's prompt box and your shell
 
-The name **sethu** is Sanskrit for *"bridge"* (a word shared across Indian
-languages). It bridges the two, so you can run terminal commands without leaving
-the Claude Code chat.
+Run terminal commands **right in the Claude Code prompt box**, see the output
+yourself for **free** (it never touches the model), and share it with Claude only
+when you want it to act on the result. (*sethu* is Sanskrit for *"bridge"*.)
 
-**The problem:** while working in Claude Code you constantly want to *peek* at
-things like `git status`, a diff, a file, or `ls`. But every command you ask
-Claude to run dumps its output into the context window. That **costs tokens**,
-**clutters the conversation**, and fills your context faster (so auto-compaction
-hits sooner). Alt-tabbing to a real terminal breaks your flow.
+### The problem
 
-**sethu fixes that.** Run those commands **right in the prompt box** and see the
-output yourself for **free** (it never touches the model). Share it with Claude
-only when you actually want it to act on the result.
+Every command you ask Claude to run dumps its output into the context window. That
+**costs tokens**, **clutters the conversation**, and fills your context faster (so
+auto-compaction hits sooner). Alt-tabbing to a real terminal breaks your flow.
+
+### What sethu does
+
+Type a command with a `>` prefix as an ordinary message. A `UserPromptSubmit` hook
+runs it locally and blocks the prompt, so **the model never sees it and you spend
+nothing**. Use `>>` when you *do* want Claude to see the output.
 
 ```text
 > grep -n TODO src/   # runs it, shows YOU the output (zero tokens, model never sees it)
@@ -21,10 +23,7 @@ sethu --allow git     # opt a whole tool in (git/find/npm/…); safe tools like 
 > git status          # now runs (git was allowed above)
 ```
 
-Type a command prefixed with `>` as an ordinary message. A `UserPromptSubmit`
-hook catches it, runs it locally, and blocks the prompt, so the model never sees
-it and you spend nothing. Use `>>` when you *do* want Claude to see the output.
-Every result is tagged with the little `|^=^|` bridge so sethu's output is easy
+Every result is tagged with the little `|^=^|` bridge, so sethu's output is easy
 to spot.
 
 ---
@@ -43,9 +42,8 @@ to spot.
 - **🛡️ Safe by default.** **Gated** out of the box: a curated set of safe inspection
   tools (`ls`, `cat`, `grep`, `jq`, …) just works, while everything else is refused
   until you `--allow` that tool (or `--trust on` for everything).
-- **🪶 No package installs.** Pure Python standard library, so there's no `pip`,
-  no npm, and no third-party packages to manage. (It does need `python3`, see
-  Requirements.)
+- **🪶 No package installs.** Pure Python standard library: no `pip`, no npm, no
+  third-party packages to manage. (See Requirements before you start.)
 
 > **sethu vs. `!` bang mode:** `!` always feeds output to Claude, so it always
 > costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
@@ -290,9 +288,13 @@ coverage table at the top of `tests/test_sethu.py`, guarded by a meta-test that
 fails if any argument is untested). CI runs them on every push and PR.
 
 See **[docs/testing.md](docs/testing.md)** for how to exercise a behavior directly
-and how to test a feature branch live in Claude Code before merging, and
+and how to test a feature branch live in Claude Code before merging,
 **[docs/design-guidelines.md](docs/design-guidelines.md)** for the UX / correctness
-/ security / performance / storage principles every change is checked against.
+/ security / performance / storage principles every change is checked against, and
+**[docs/versioning.md](docs/versioning.md)** for what the version number means and how
+to title your PR (the title drives the automated version bump).
+
+---
 
 ## ℹ️ About Claude Code
 
@@ -302,6 +304,8 @@ Anthropic's official CLI for Claude, built entirely from its extension points (a
 hint). Docs: [Claude Code](https://claude.com/claude-code) ·
 [Plugins](https://code.claude.com/docs/en/plugins) ·
 [Hooks](https://code.claude.com/docs/en/hooks).
+
+---
 
 ## License
 
