@@ -147,7 +147,7 @@ Config lives in `~/.claude/sethu.json`.
   **shell mode** an `alias` or `PATH` you set can change what a later gated name runs.
 - **The runner executes in your shell without Claude Code's per-command
   permission prompts**, so keep the allowlist tight, like shell aliases. `--allow`-ing
-  a launcher (`git`, `sh`, `python`, …) permits *any* of its flags — sethu warns you.
+  a launcher (`git`, `sh`, `python`, …) permits *any* of its flags; sethu warns you.
 - **Injection-hardened.** An allowed/gated tool may only be followed by plain
   arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or substitution.
   Allowing `ls` does **not** allow `> ls; rm -rf ~`. (Metacharacters *inside
@@ -171,7 +171,7 @@ to do instead:
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
 | **Different modes in two sessions at once** | Settings (mode, allowlist, trust) live in one shared config, so `sethu --mode` / `--allow` apply to **all** your Claude sessions. (Each session's working dir and `shell` bash stay separate.) | Set the mode you need for now; you can't run one session in `shell` and another in `cwd` simultaneously. |
 | **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
-| **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …) — git's behavior, same as your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
+| **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …); that's git's behavior, same as your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for
@@ -181,20 +181,20 @@ to do instead:
 
 ## 🛟 Troubleshooting
 
-- **"UserPromptSubmit operation blocked by hook:" appears before my output** — that's
+- **"UserPromptSubmit operation blocked by hook:" appears before my output**: that's
   normal, and it means it worked. Claude Code prints that wrapper around any prompt a
   hook handles locally; it's how sethu keeps your command out of the model. The
   `|^=^| [mode] ✓ exit 0` line below it is your actual result.
-- **I typed `> cmd` but nothing ran (or Claude answered it instead)** — you typed it
+- **I typed `> cmd` but nothing ran (or Claude answered it instead)**: you typed it
   while Claude was still generating. sethu only fires on a prompt that *starts* a turn,
   so a `>` typed mid-response is read by the model (and costs tokens), not run by sethu.
   Send `> cmd` when Claude is idle.
-- **"`X` isn't in the gated set."** — sethu is gated by default; the message tells you
+- **"`X` isn't in the gated set."**: sethu is gated by default; the message tells you
   why (e.g. `git`/`npm` can write or run other programs). To permit it, `sethu --allow X`
   (the whole tool). If it's interactive (`vim`, a bare REPL), use `sethu --launch "X"`
   instead (allowlisting can't make those run). To drop the guardrails entirely, there's
-  `sethu --trust on` — genuinely risky, so prefer allowlisting the specific tools you want.
-- **"timed out after 20s."** — captured commands are capped under Claude Code's ~30s hook
+  `sethu --trust on`, genuinely risky, so prefer allowlisting the specific tools you want.
+- **"timed out after 20s."**: captured commands are capped under Claude Code's ~30s hook
   budget. Raise it with `sethu --timeout`, or run long-lived commands (servers, `tail -f`)
   in a real terminal with `sethu --launch`.
 
@@ -227,11 +227,11 @@ the `>` prefix.
 <details>
 <summary>Accessibility (screen readers, plain terminals)</summary>
 
-The header is colorblind-safe (Okabe-Ito) and never color-only — status, mode, and
+The header is colorblind-safe (Okabe-Ito) and never color-only; status, mode, and
 warnings are always words, so a screen reader gets the full meaning; `NO_COLOR` drops
 color. For readers, **`sethu --plain on`** (or `SETHU_PLAIN`) swaps the `|^=^|` icon and
 `·✓✗⚠→` glyphs for a plain `sethu:` prefix + comma-separated words (e.g. `sethu: [cwd],
-exit 0, $ git status`) — also a fallback for terminals without good Unicode.
+exit 0, $ git status`), also a fallback for terminals without good Unicode.
 </details>
 
 <details>

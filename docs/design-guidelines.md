@@ -60,7 +60,10 @@ with one, either don't make it or update this doc deliberately.
   (`✔ added` / `already allowed` / `not in list`, not always `✔`).
 - **Plain, natural language.** No em-dashes; commas/colons/parentheses instead.
   Concrete over jargon ("gated won't run it automatically", not "isn't
-  auto-allowed"). Concise; say each thing once.
+  auto-allowed"). Concise; say each thing once. **Scope:** this governs everything a
+  *user* reads (tool output, refusals, `README.md`, `docs/use-cases.md`). The internal
+  dev notes (`docs/design-guidelines.md`, `CLAUDE.md`) are working reference where
+  density wins, so em-dashes there are fine; don't sweep them.
 
 ## Correctness
 
@@ -68,16 +71,14 @@ with one, either don't make it or update this doc deliberately.
   the top of `tests/test_sethu.py`, enforced by `TestCoverageEnforcement` (fails if
   any arg is untested). Add a row + test for anything new.
 - **`docs/use-cases.md` is a contract, not decoration.** Every command shown there
-  must behave exactly as documented — a "gated / out of the box" example must run
+  must behave exactly as documented: a "gated / out of the box" example must run
   without `--allow`, and an `--allow` / `--launch` / `--mode` example must work as
   described. Any change to the gating set (`GATED`), `is_gated`, `_DANGER`, the chain
   guard, `--allow` matching (`_matches`), interactive detection, or mode permissions
-  **MUST be re-checked against every use-case**, because those examples are what a new
-  user copies literally. (Real breakage: `> jq '.users | length' data.json` was refused
-  because `is_gated` split on `|` quote-*un*aware — a documented gated command that
-  didn't run.) When you change what's permitted, re-verify the doc and update it in the
-  **same** change; when a use-case can be pinned as a behavior test, prefer that over
-  trusting prose (see `TestGatedFn.test_pipe_inside_quotes_is_not_a_chain`).
+  MUST be re-checked against every use-case, because those examples are what a new user
+  copies literally. When you change what's permitted, re-verify the doc and update it in
+  the **same** change; when a use-case can be pinned as a behavior test, prefer that over
+  trusting prose (e.g. `TestGatedFn.test_pipe_inside_quotes_is_not_a_chain`).
 - **Validate values, not just types.** A hand-edited config must never crash or
   misbehave: coerce list entries to strings, fall back an invalid mode, reject an
   empty prefix, fall back malformed numbers.
@@ -154,12 +155,13 @@ with one, either don't make it or update this doc deliberately.
 - **Verify no degradation with the invariant test, not ms thresholds.** The fast path
   skipping `_engine` is pinned by `test_fast_path_skips_engine_import` (deterministic).
   Wall-clock is env-dependent (interpreter startup dominates and varies by machine),
-  so it's a **reference, not a CI gate**. Reference baseline (2026-07-03, one machine):
+  so it's a **reference, not a CI gate**. Reference baseline (2026-07-06, one machine):
   normal-prompt overhead ≈ 32 ms of which **sethu's own code is < 1 ms**; `> cmd`
-  +4 ms (bash spawn); warm shell ≈ 38 ms; `_maybe_sethu` ≈ 11 µs;
-  `is_gated`/`_matches` sub-µs. Re-measure with
-  `python3 -X importtime hooks/sethu_hook.py` and a `timeit` loop over `process()`
-  when touching a hot path.
+  +4 ms (bash spawn); warm shell ≈ 38 ms; `_maybe_sethu` ≈ 11 µs; `is_gated`/`_matches`
+  ≈ 5–11 µs (the quote-aware `shlex` tokenize, up from the old naive split, still ~400×
+  under the +4 ms bash spawn and only on the `> cmd` path, never the every-prompt fast
+  path). Re-measure with `python3 -X importtime hooks/sethu_hook.py` and a `timeit` loop
+  over `process()` when touching a hot path.
 
 ## Storage
 
