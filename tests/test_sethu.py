@@ -451,8 +451,9 @@ class TestManagementCLI(Base):
         with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit):
             _engine.main(["--mode", "nope"])
         err = buf.getvalue()
-        self.assertIn(_engine.ICON, err)
-        self.assertIn("sethu: error:", err)
+        self.assertIn(_engine.ICON, err)          # icon brands it (no doubled "sethu:")
+        self.assertIn("error:", err)
+        self.assertNotIn("sethu: error:", err)    # the redundant prog prefix is gone
         self.assertIn("options menu", err)
 
 
@@ -1546,7 +1547,7 @@ class TestHookOutput(Base):
         self.assertEqual(out["decision"], "block")
         self.assertIn("quotes", out["reason"])
         self.assertIn(_engine.ICON, out["reason"])         # branded like other messages
-        self.assertIn("sethu: error:", out["reason"])      # matches the CLI error format
+        self.assertIn("error:", out["reason"])             # matches the CLI error format
         self.assertNotIn('"oops', _engine.load_config()["allow"])
 
     def test_run_command_emits_block(self):

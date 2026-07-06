@@ -105,7 +105,7 @@ def main():
         except ValueError:
             # Unbalanced quotes: refuse rather than run with a broken argv that
             # would persist a garbage token (e.g. `sethu allow "oops`).
-            _block(_lead(_c("sethu: error: mismatched quotes in that command. "
+            _block(_lead(_c("error: mismatched quotes in that command. "
                             "Check your quoting and try again.", "fail", on)))
         try:
             run = subprocess.run(

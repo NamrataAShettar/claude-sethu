@@ -1243,10 +1243,20 @@ class _Parser(argparse.ArgumentParser):
     default dumps a plain, monochrome usage wall that's hard to spot the error in).
     Points at the menu instead of re-printing every flag."""
     def error(self, message):
-        on = _color_on(load_config())
+        cfg = load_config()
+        on = _color_on(cfg)
+        plain = _plain_on(cfg)
+        # Lead with the icon (or `sethu:` in plain mode) — NOT a hardcoded "sethu:",
+        # which doubled the branding and clashed with the plain-mode prefix.
+        lead = "sethu: " if plain else _c(ICON, "icon", on) + " " + _c("·", "dim", on) + " "
+        hint = ""
+        if message.startswith("unrecognized arguments"):
+            # The usual cause: extra words after a one-value flag (`--allow ls echo`).
+            hint = _c("\n  a flag takes ONE value — quote a multi-word command "
+                      "(`sethu --allow \"git status\"`), or allow tools one at a time.",
+                      "dim", on)
         sys.stderr.write(
-            _c(ICON, "icon", on) + " " + _c("·", "dim", on) + " "
-            + _c(f"sethu: error: {message}", "fail", on) + "\n"
+            lead + _c(f"error: {message}", "fail", on) + hint + "\n"
             + _c("Run `sethu` for the options menu.", "dim", on) + "\n")
         sys.exit(2)
 
