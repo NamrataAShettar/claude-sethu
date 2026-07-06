@@ -126,6 +126,22 @@ sethu --trust on           # ⚠ run anything, gate off (footgun)
 sethu --runner             # show config
 ```
 
+## 13. When a command won't run out of the box
+
+sethu auto-runs safe inspection commands; anything that writes, execs, is interactive,
+or long-running needs a nudge:
+
+| You want to… | Out of the box | Do this |
+| --- | --- | --- |
+| build / test / install (`npm test`, `pip install`) | refused (writes / network) | `sethu --allow "npm test"` once |
+| keep a venv / `cd` / `export` across commands | doesn't persist | `sethu --mode shell` |
+| edit or browse (`vim`, `top`, `less`, a REPL) | can't (no terminal) | `sethu --launch "vim"` |
+| run a server or `tail -f` (long-running) | 20s cap | `sethu --launch` into a pane |
+| run a command that prompts `[Y/n]` | can't type back | non-interactive flags (`-y`), or `--launch` |
+| chain commands (`a && b`, `a; b`) | refused for safety | run the parts as separate `>` commands |
+
+The README's **"When sethu won't work"** table has the full *why* for each.
+
 ---
 
 ## Who benefits most
