@@ -28,6 +28,7 @@ import os
 import re
 import select
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -1102,6 +1103,18 @@ def process(prompt, data):
     mode = cfg.get("mode", "cwd")
     # One safety knob: trust off (default) = gated, trust on = everything runs.
     trust_on = bool(cfg.get("trust"))
+
+    # An unbalanced quote would reach the shell as a broken command and leak a raw
+    # `/bin/sh: unexpected EOF while looking for matching`. Catch it here (same shlex
+    # check the management CLI uses for `sethu --allow "oops`) and give a friendly,
+    # branded hint instead of the shell's error.
+    try:
+        shlex.split(cmd)
+    except ValueError:
+        return {"block": _reply(mode, trust_on, cmd,
+                "has an unbalanced quote, so sethu didn't run it. Check the quoting "
+                "and try again.", on, plain)}
+
     sid = data.get("session_id")
     base = get_cwd(sid, data.get("cwd"))
 
@@ -1154,12 +1167,28 @@ def process(prompt, data):
 
     allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or is_gated(cmd)
     if not _is_bare_cd(cmd) and not allowed:
+        tool = os.path.basename(prog) if prog else cmd
+        # A name we can't find on PATH is a typo or an uninstalled tool, not a safety
+        # wall — say that plainly instead of the generic "can change files" refusal,
+        # which reads as if a mistyped command were dangerous. Only trust PATH in
+        # cwd/stateless (a fresh subprocess each command, so PATH is authoritative);
+        # shell mode may resolve the name via a user function/alias/`PATH` we can't
+        # see, so keep the generic reason there. Chains/exec-builtins keep their own
+        # messages. The allow/trust/launch bullets can't help run a command that
+        # doesn't exist, so this branch skips them.
+        not_found = (mode != "shell" and prog and not _DANGER.search(cmd)
+                     and tool not in GATED and prog not in _EXEC_BUILTINS
+                     and shutil.which(prog) is None)
+        if not_found:
+            return {"block": _reply(mode, trust_on, cmd,
+                    f"isn't a command sethu can find. Check the spelling, or install "
+                    f'it. If it is real and you want it: sethu --allow "{tool}".',
+                    on, plain)}
         # One plain reason line (specific why, else a generic fallback), then the
         # actions once. A chain can't be fixed by allowing a tool (the guard refuses
         # chaining regardless), so drop the "Allow this tool" bullet for those.
         reason = _why_refused(cmd, cfg) or ("sethu doesn't run this automatically — "
             "part of it can change files or run other programs.")
-        tool = os.path.basename(prog) if prog else cmd
         b = "-" if plain else "•"
         bullets = []
         if not _DANGER.search(cmd):
@@ -1530,7 +1559,7 @@ def _print_config(cfg):
     ml = max_lines(cfg)
     print(f"config ({config_path()}):")   # the `sethu:`/icon lead is added by `_lead`
     print(f"  prefix:   {cfg['prefix']!r}   (default '>'; > run+block free, >> send to Claude)")
-    print(f"  mode:     {cfg['mode']}   (default cwd; one of: {', '.join(MODES)})")
+    print(f"  mode:     {cfg['mode']}   (default cwd; one of: {', '.join(MODES)}; `>` runs in the session's working dir)")
     print(f"  trust:    {trust_disp}   (default off; off = gated safe tools + your --allow'd)")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (default off; shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (default on; colored result header)")
