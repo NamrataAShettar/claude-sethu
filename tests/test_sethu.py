@@ -451,8 +451,9 @@ class TestManagementCLI(Base):
         with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit):
             _engine.main(["--mode", "nope"])
         err = buf.getvalue()
-        self.assertIn(_engine.ICON, err)
-        self.assertIn("sethu: error:", err)
+        self.assertIn(_engine.ICON, err)          # icon brands it (no doubled "sethu:")
+        self.assertIn("error:", err)
+        self.assertNotIn("sethu: error:", err)    # the redundant prog prefix is gone
         self.assertIn("options menu", err)
 
 
@@ -554,6 +555,47 @@ class TestRefusalMessages(Base):
         self.write(color=False)
         self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
         self.assertIn('--allow "npm"', self.proc("> npm test")["block"])
+
+
+class TestBugBash2(Base):
+    """Fixes from the 2026-07-06 review."""
+
+    def _cli(self, *args):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            try:
+                _engine.main(list(args))
+            except SystemExit:
+                pass
+        return buf.getvalue()
+
+    def test_allow_rejects_a_chain(self):
+        # H-1: --allow won't store a chain; and a chain never matches the allowlist.
+        out = self._cli("--allow", "ls; touch /tmp/SETHU_CHAIN_TEST")
+        self.assertIn("won't allowlist a chain", out)
+        self.assertEqual(_engine.load_config()["allow"], [])          # not stored
+        self.assertFalse(_engine._matches("ls; rm", ["ls; rm"]))      # never matches
+        self.assertFalse(_engine._matches("ls | sh", ["ls | sh"]))
+
+    def test_allow_plain_tool_still_works(self):
+        self.write(allow=[])
+        self._cli("--allow", "git")
+        self.assertIn("git", _engine.load_config()["allow"])
+
+    def test_rc_does_not_drop_co_flags(self):
+        # M-3: `--rc on --mode shell --allow git` must apply ALL of them.
+        self.write(mode="cwd", rc=False, allow=[])
+        self._cli("--rc", "on", "--mode", "shell", "--allow", "git")
+        c = _engine.load_config()
+        self.assertTrue(c["rc"])
+        self.assertEqual(c["mode"], "shell")
+        self.assertIn("git", c["allow"])
+
+    def test_ag_not_gated(self):
+        # M-4: ag dropped from GATED (--pager exec vector unverifiable).
+        self.assertNotIn("ag", _engine.GATED)
 
 
 class TestPlainMode(Base):
@@ -1505,7 +1547,7 @@ class TestHookOutput(Base):
         self.assertEqual(out["decision"], "block")
         self.assertIn("quotes", out["reason"])
         self.assertIn(_engine.ICON, out["reason"])         # branded like other messages
-        self.assertIn("sethu: error:", out["reason"])      # matches the CLI error format
+        self.assertIn("error:", out["reason"])             # matches the CLI error format
         self.assertNotIn('"oops', _engine.load_config()["allow"])
 
     def test_run_command_emits_block(self):

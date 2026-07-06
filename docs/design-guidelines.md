@@ -81,7 +81,10 @@ with one, either don't make it or update this doc deliberately.
   load-bearing invariant — don't erode it:
   - **Auto-runs without `--allow`, in every mode:** the `GATED` tools **plus** the
     set-a-variable/alias builtins (`export`/`alias`/`unalias`/`unset`), all chain-guarded.
-    None of these execute external code.
+    None execute external code *themselves* — though in shell mode the state they set
+    (`export PATH=…`, `alias ls=…`) can change what LATER commands resolve to. That's the
+    user shaping their own shell (same as any terminal), not a sethu escalation; the gate
+    still only auto-runs the known tool *names*.
   - **Never auto-runs, in any mode:** anything that executes code — `source`/`.` (they
     run a file's contents = arbitrary code) and every non-gated tool → requires
     `--allow` (the whole tool) or `--trust`.
