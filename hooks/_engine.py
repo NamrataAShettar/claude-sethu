@@ -973,10 +973,11 @@ HELP = ("sethu: type `> <command>` to run an allowlisted command (free), or "
 
 
 def _why_refused(cmd, cfg):
-    """A short, plain-language reason WHY a command was refused, when we can detect
-    it, so the refusal explains itself to the user instead of hiding the cause.
-    Empty when it's just
-    'the allowlist is empty' (the generic message covers that)."""
+    """The specific REASON a command isn't auto-run, phrased to read as a continuation
+    of the header's `$ cmd` (lowercase start). Reason only — the actions (`--allow` /
+    `--launch` / `--trust` / `--gated-list`) are the refusal's bullets, so we don't
+    repeat them here. Empty → the caller's generic 'isn't in the gated set' line covers
+    it (e.g. a pipe whose first tool is gated but a later segment isn't)."""
     if cfg.get("trust"):
         return ""  # trust is on, nothing is refused; caller won't reach here anyway
     toks = cmd.split()
@@ -984,17 +985,14 @@ def _why_refused(cmd, cfg):
         return ""
     prog = os.path.basename(toks[0])
     if prog in _EXEC_BUILTINS:
-        return (f"`{prog}` runs the contents of a file (arbitrary code), so it isn't "
-                f"gated. Allow it once with `sethu --allow {prog}`.")
+        return (f"`{prog}` runs the contents of a file as code, so sethu doesn't run it "
+                f"automatically.")
     if _DANGER.search(cmd):
-        return ("For safety, gated mode won't run commands joined by `;`, `&&`, "
-                "`&`, redirects (`>`), or `$(…)`. Run the parts as separate `>` "
-                "commands, or `--allow` the tool and `--trust on` for the rest.")
+        return ("sethu won't run commands joined by `;`, `&&`, `&`, redirects (`>`), or "
+                "`$(…)` — run the parts as separate `>` commands.")
     if prog not in GATED:
-        return (f"`{prog}` isn't in the gated set (it can write or run other programs "
-                f"with some flag, so it's not auto-run). Allow it with "
-                f"`sethu --allow {prog}` — that permits any flags of `{prog}`, your "
-                f"call. `sethu --gated-list` shows what's gated.")
+        return (f"`{prog}` can change files or run other programs, so sethu doesn't run "
+                f"it automatically.")
     return ""
 
 
@@ -1072,16 +1070,21 @@ def process(prompt, data):
 
     allowed = trust_on or safe_builtin or _matches(cmd, cfg["allow"]) or is_gated(cmd)
     if not _is_bare_cd(cmd) and not allowed:
-        why = _why_refused(cmd, cfg)
-        why_line = (why + "\n") if why else ""
+        # One plain reason line (specific why, else a generic fallback), then the
+        # actions once. A chain can't be fixed by allowing a tool (the guard refuses
+        # chaining regardless), so drop the "Allow this tool" bullet for those.
+        reason = _why_refused(cmd, cfg) or ("sethu doesn't run this automatically — "
+            "part of it can change files or run other programs.")
         tool = os.path.basename(prog) if prog else cmd
-        return {"block": _reply(mode, trust_on, cmd,
-                f"isn't in the gated set, so it doesn't run on its own.\n"
-                f"{why_line}"
-                f"  • Allow this tool:     sethu --allow \"{tool}\"\n"
-                f"  • Open in a terminal:  sethu --launch \"{cmd}\"\n"
-                f"  • Run everything:      sethu --trust on   (footgun)\n"
-                f"  • See what's gated:    sethu --gated-list", on)}
+        bullets = []
+        if not _DANGER.search(cmd):
+            bullets.append(f'  • Allow this tool:     sethu --allow "{tool}"')
+        bullets += [
+            f'  • Open in a terminal:  sethu --launch "{cmd}"',
+            f"  • Run everything:      sethu --trust on   (footgun)",
+            f"  • See what's gated:    sethu --gated-list",
+        ]
+        return {"block": _reply(mode, trust_on, cmd, reason + "\n" + "\n".join(bullets), on)}
 
     t = cmd_timeout(cfg)
     if mode == "shell":
