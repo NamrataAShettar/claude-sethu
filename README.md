@@ -125,25 +125,26 @@ Config lives in `~/.claude/sethu.json`.
 | `cwd` *(default)* | ✅ | ❌ | working dir remembered in a temp file |
 | `shell` | ✅ | ✅ | one persistent `bash` (PTY daemon), reused |
 
-`shell` mode keeps a long-lived bash so `cd`, env vars, `source`, and venvs carry
-across commands. It idles out after 30 min, and `sethu --restart` clears it on
-demand. By default it runs a clean `bash --norc`. Turn on `sethu --rc on` to
-source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
+**Notes:**
+
+- By default, `>` runs in your Claude Code session's working directory (the folder
+  you launched Claude in).
+- `shell` mode keeps a long-lived bash so `cd`, env vars, `source`, and venvs carry
+  across commands. It idles out after 30 min, and `sethu --restart` clears it on demand.
+- `shell` mode runs a clean `bash --norc` by default; turn on `sethu --rc on` to source
+  your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
 
 ---
 
 ## 🛡️ Safety
 
-- **Gated by default.** A curated set of tools that are safe with *any* flags
-  (`ls`, `cat`, `grep`, `jq`, …) runs; everything else — including tools that *can*
-  write or exec (`git`, `find`, `npm`, …) — is refused until you `sethu --allow` that
-  tool. No per-flag policing: a tool is either flag-safe (gated) or you allow it whole.
-- **Gated is a safe *default*, not a sandbox.** You can always run anything via
-  your terminal, `!`, `--allow`, or `--trust` — so it's a guardrail against
-  surprises, not a security boundary. (One consequence is noted in the limits below.)
-  The "flag-safe" property is a cwd/stateless guarantee — in **shell mode**, aliases and
-  `PATH` you set apply to later commands (as in any shell), so a gated tool resolves to
-  whatever you redefined.
+- **Gated by default.** Only tools that can't write or exec with *any* flags
+  (`ls`, `cat`, `grep`, `jq`, …) run on their own; anything that can (`git`, `find`,
+  `npm`, …) waits for `sethu --allow`. A tool is gated whole or allowed whole, no
+  per-flag policing.
+- **A guardrail, not a sandbox.** You can always bypass it via your own terminal, or
+  by widening the gate with `--allow` or `--trust`. Flag-safety is per-command too: in
+  **shell mode** an `alias` or `PATH` you set can change what a later gated name runs.
 - **The runner executes in your shell without Claude Code's per-command
   permission prompts**, so keep the allowlist tight, like shell aliases. `--allow`-ing
   a launcher (`git`, `sh`, `python`, …) permits *any* of its flags — sethu warns you.

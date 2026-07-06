@@ -370,6 +370,7 @@ class TestManagementCLI(Base):
             out = self._out(flag)
             self.assertIn("mode:", out, flag)
             self.assertIn("default", out, flag)   # shows each field's default
+            self.assertIn("session's working dir", out, flag)  # where `>` runs
 
     def test_restart_reports(self):
         self.assertIn("restarted", self._out(["--restart"]))
@@ -555,6 +556,48 @@ class TestRefusalMessages(Base):
         self.write(color=False)
         self.assertIn("separate", self.proc("> ls; rm -rf ~")["block"])
         self.assertIn('--allow "npm"', self.proc("> npm test")["block"])
+
+    def test_unknown_command_is_not_labelled_dangerous(self):
+        # A typo / uninstalled tool isn't a safety wall — it says "can't find", NOT the
+        # scary "can change files or run other programs" (which reads as if a mistyped
+        # word were dangerous). The allow/trust/launch *bullets* are dropped too — they
+        # can't run a command that doesn't exist.
+        self.write(color=False)
+        b = self.proc("> notacommand123xyz")["block"]
+        self.assertIn("isn't a command sethu can find", b)
+        self.assertNotIn("change files or run other programs", b)
+        self.assertNotIn("--trust on", b)          # the bullet menu is suppressed
+        self.assertNotIn("See what's gated", b)
+
+    def test_real_dangerous_command_keeps_safety_message(self):
+        # A command that DOES exist and can write/exec keeps the safety framing — the
+        # not-found refinement must not weaken the real guardrail. (`rm` is on PATH.)
+        self.write(color=False)
+        b = self.proc("> rm foo")["block"]
+        self.assertIn("change files or run other programs", b)
+        self.assertIn('sethu --allow "rm"', b)     # and the full menu is present
+
+    def test_unknown_command_stays_generic_in_shell_mode(self):
+        # In shell mode a name may resolve to a user function/alias/PATH we can't see,
+        # so we must NOT claim it's unknown — keep the generic refusal there.
+        self.write(color=False, mode="shell")
+        b = self.proc("> notacommand123xyz")["block"]
+        self.assertIn("change files or run other programs", b)
+        self.assertNotIn("isn't a command sethu can find", b)
+
+    def test_unbalanced_quote_gets_friendly_hint_not_shell_error(self):
+        # An unbalanced quote must NOT leak the raw `/bin/sh: unexpected EOF` — it gets
+        # the same friendly "unbalanced quote" guidance the management CLI gives.
+        self.write(color=False)
+        for p in ('> echo "hi', ">> echo 'hi", '> cat "a b'):
+            b = self.proc(p)["block"]
+            self.assertIn("unbalanced quote", b, p)
+            self.assertNotIn("EOF", b, p)
+            self.assertNotIn("/bin/sh", b, p)
+        # a *balanced* quoted command still runs normally
+        r = self.proc('> echo "hi there"')["block"]
+        self.assertIn("hi there", r)
+        self.assertIn("exit 0", r)
 
 
 class TestBugBash2(Base):
