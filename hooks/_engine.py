@@ -1290,11 +1290,10 @@ def _apply_cli_mutations(a, cfg):
         if not val:
             print("nothing to allow (the command was empty)."); noop = True
         elif _is_chain_unsafe(val):
-            t = os.path.basename(val.split()[0]) if val.split() else "<tool>"
             print(f"won't allowlist a chain: {val!r}. sethu allows tools, not chained "
-                  f"commands — allow the tools individually (e.g. `sethu --allow {t}`) "
-                  f"and run the parts as separate `>` commands, or `sethu --trust on` to "
-                  f"run everything."); noop = True
+                  f"commands — allow the tools you need individually (one `sethu --allow "
+                  f"<tool>` each) and run the parts as separate `>` commands, or "
+                  f"`sethu --trust on` to run everything."); noop = True
         elif val in cfg["allow"]:
             print(f"already allowed: {val!r} (no change)."); noop = True
         else:
