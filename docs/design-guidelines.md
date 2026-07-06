@@ -106,6 +106,14 @@ with one, either don't make it or update this doc deliberately.
   a flag-safety claim, so a `--allow`'d tool need not be flag-safe. Gated is a safe
   *default* / guardrail, not a sandbox — the user can run anything via their terminal, `!`,
   `--allow`, or `--trust`.
+  **Scope of the flag-safe guarantee:** it's a PER-COMMAND property and holds in
+  cwd/stateless (fresh subprocess each command). In **shell mode** it can be voided by the
+  user's own prior auto-run state — `alias ls=…` or `export PATH=…` redefine what a later
+  gated name resolves to (M-2, audited-reproduced 2026-07-06). Decision: DOCUMENT, don't
+  block — blocking `export PATH=`/aliases would gut shell mode (whose purpose is
+  persistence; `source .venv/bin/activate` changes PATH too), and it needs the user to type
+  that alias/export themselves (no external attacker can inject a `>` command). Documented
+  in README §Safety + the `GATED` comment. Do NOT re-litigate as a bug without a new vector.
 - **Allowlist stays injection-hardened.** An allowlisted command may only be
   followed by plain arguments — no unquoted pipe/redirect/`;`/`&&`/subshell/
   substitution. Allowing `ls` must never permit `ls; rm`.

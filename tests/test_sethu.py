@@ -843,7 +843,7 @@ class TestTruncate(Base):
         self.write(allow=["seq"], maxLines=10, color=False)
         r = self.proc("> seq 100", sid="trunc1")["block"]
         self.assertIn("more line", r)          # truncation note present
-        self.assertIn("full output:", r)        # points at the file
+        self.assertIn("full output", r)         # points at the file
         self.assertNotIn("\n100", r)            # line 100 not shown inline
         # …and the file has the whole thing.
         path = _engine._output_path("trunc1")
@@ -871,6 +871,15 @@ class TestTruncate(Base):
 
 
 class TestSweep(unittest.TestCase):
+    def setUp(self):
+        # Isolate the sweep to a private dir so it never touches the real /tmp
+        # (the tests are age-gated, but keep the discipline the other classes have).
+        self._orig_tempdir = tempfile.tempdir
+        tempfile.tempdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        tempfile.tempdir = self._orig_tempdir
+
     def test_old_files_removed_fresh_kept(self):
         import tempfile as _tf
         tmp = _tf.gettempdir()
@@ -906,7 +915,8 @@ class TestSweep(unittest.TestCase):
                                  for p in (old, sentinel)])
         now = os.path.getmtime(old) + 100
         os.utime(old, (now - _engine._TEMP_MAX_AGE - 1000,) * 2)  # very stale
-        os.utime(sentinel, (now - 10, now - 10))                  # swept 10s ago
+        open(sentinel, "w").close()                               # sweep sentinel…
+        os.utime(sentinel, (now - 10, now - 10))                  # …swept 10s ago
         _engine._sweep_temp(now)                                  # throttled → skip
         self.assertTrue(os.path.exists(old), "recent sweep must skip the scan")
         _engine._sweep_temp(now, force=True)                      # forced → runs
@@ -1462,6 +1472,7 @@ class TestConfig(Base):
         self.assertEqual(_engine.max_lines({}), 40)
         self.assertEqual(_engine.max_lines({"maxLines": 0}), 0)      # unlimited
         self.assertEqual(_engine.max_lines({"maxLines": 100}), 100)
+        self.assertEqual(_engine.max_lines({"maxLines": -5}), 0)     # negative → clamped
 
     def test_malformed_config_types_fall_back(self):
         # A hand-edited config with wrongly-typed values falls back per key
@@ -1637,7 +1648,8 @@ class TestEveryResponseLeadsWithIcon(Base):
             ("sethu --definitelynotaflag", {}),       # argparse error
             ("sethu", {}),                            # help menu
             ('sethu allow "oops', {}),                # mismatched quotes
-        ]
+            ('sethu --prefix "|^=^|"', {}),           # F1: a value CONTAINING the icon
+        ]                                             #     must still get a leading icon
         for prompt, cfg in cases:
             txt = self._user_text(prompt, **cfg)
             self.assertTrue(txt.startswith(lead),

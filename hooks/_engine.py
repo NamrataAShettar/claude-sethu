@@ -85,7 +85,7 @@ def max_lines(cfg):
     """maxLines from config, coerced safely — a malformed value (e.g. a string)
     must not crash the hook, which would break every `>` prompt."""
     try:
-        return int(cfg.get("maxLines", MAX_LINES) or 0)
+        return max(0, int(cfg.get("maxLines", MAX_LINES) or 0))   # negative → 0 (unlimited)
     except (ValueError, TypeError):
         return MAX_LINES
 
@@ -179,11 +179,17 @@ def _reply(mode, trust_on, cmd, body, on, plain=False):
     return _header(mode, trust_on, None, cmd, on, plain) + "\n" + body
 
 
+def _sid_hash(sid):
+    """Short stable hash of a session id — the per-session key for the out-log and the
+    daemon socket. (The cwd file uses a different alnum-filtered scheme on purpose, so a
+    human can eyeball which session it belongs to.)"""
+    return hashlib.md5((sid or "default").encode()).hexdigest()[:12]
+
+
 def _output_path(sid):
     """Stable per-session file holding the LAST command's full output. Reused
     (overwritten) each command, so a session never accumulates more than one."""
-    h = hashlib.md5((sid or "default").encode()).hexdigest()[:12]
-    return os.path.join(tempfile.gettempdir(), f"sethu-out-{h}.log")
+    return os.path.join(tempfile.gettempdir(), f"sethu-out-{_sid_hash(sid)}.log")
 
 
 # How long sethu's own temp files (saved output + launch scripts) live before the
@@ -212,11 +218,18 @@ def _sweep_temp(now, force=False):
                 return  # swept recently — skip the directory scan
         except OSError:
             pass  # no sentinel yet → sweep now and create it
+    # Predictable name in a shared tmp dir → never follow a symlink (a planted link
+    # could redirect the mtime bump, or worse). Open the existing sentinel O_NOFOLLOW
+    # and utime the fd; if it's absent (or IS a symlink) create it fresh, also O_NOFOLLOW.
     try:
-        os.utime(sentinel, (now, now))
+        fd = os.open(sentinel, os.O_WRONLY | os.O_NOFOLLOW)
+        try:
+            os.utime(fd, (now, now))
+        finally:
+            os.close(fd)
     except OSError:
         try:
-            open(sentinel, "w").close()
+            os.close(os.open(sentinel, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600))
         except OSError:
             pass
     # One directory pass, matching both prefixes, instead of two glob() calls.
@@ -230,11 +243,27 @@ def _sweep_temp(now, force=False):
                 (n.startswith("sethu-launch-") and n.endswith(".command")) or
                 (n.startswith("sethu-") and n.endswith(".sock")) or
                 (n.startswith("sethu-") and n.endswith(".sock.lock")) or
-                n.startswith("sethu-cwd-")):
+                n.startswith("sethu-cwd-") or
+                n.startswith(".sethu-tmp-")):   # orphaned _atomic_write temp (crash mid-write)
             continue
         try:
             if now - e.stat().st_mtime > _TEMP_MAX_AGE:
                 os.unlink(e.path)
+        except OSError:
+            pass
+    # _atomic_write creates `.sethu-tmp-*` next to its TARGET, so the config's temps land
+    # in the config dir (~/.claude), not `tmp` — sweep that dir too (a crash between
+    # mkstemp and os.replace could orphan one). Skip if it's the same dir we just scanned.
+    cfg_dir = os.path.dirname(config_path())
+    if cfg_dir and os.path.realpath(cfg_dir) != os.path.realpath(tmp):
+        try:
+            for e in os.scandir(cfg_dir):
+                if e.name.startswith(".sethu-tmp-"):
+                    try:
+                        if now - e.stat().st_mtime > _TEMP_MAX_AGE:
+                            os.unlink(e.path)
+                    except OSError:
+                        pass
         except OSError:
             pass
 
@@ -265,7 +294,7 @@ def _truncate(out, sid, cap, on, plain=False):
         path = None
     hidden = total - cap
     shown = "\n".join(head[:cap])
-    where = (f"full output: {path}  (open it, or `sethu --launch \"less {path}\"`)"
+    where = (f"full output — view it with `sethu --launch \"less {path}\"`"
              if path else "full output unavailable (couldn't write temp file)")
     lead, sep = ("...", "-") if plain else ("…", "·")
     note = f"{lead} {hidden} more line{'s' if hidden != 1 else ''} truncated {sep} {where}"
@@ -631,6 +660,12 @@ def is_interactive(cmd):
 # can make it write/delete a file or execute another program. So there is deliberately
 # NO per-flag policing; a tool is either flag-safe (here) or it isn't (use --allow to
 # opt into its full surface, at your discretion).
+# SCOPE: this "flag-safe" property is per-command and holds in cwd/stateless (each command
+# is a fresh subprocess). In SHELL mode it can be voided by the user's OWN prior state —
+# `alias ls=…` or `export PATH=…` (both auto-run) redefine what a later gated name resolves
+# to. That's inherent to a persistent shell you're configuring (same as any terminal), not
+# a sethu escalation, and it needs the user to run that alias/export themselves; documented
+# in README §Safety + design-guidelines. NOT a per-invocation guarantee in shell mode.
 # Deliberately EXCLUDED because a flag/operand CAN write or exec: git (config/alias
 # exec + writing subcommands), find (-exec/-delete), fd (-x), rg (--pre), sort (-o),
 # uniq / xxd (positional output-file operand), yq (-i), tree (-o), file (-C); and the
@@ -650,7 +685,7 @@ GATED = {
 # regex on the whole string: gated mode is a conservative curated fast-path, so
 # it deliberately rejects even a quoted `;` (`echo "a;b"`). The allowlist path
 # (`_is_chain_unsafe`) is the quote-aware one — the divergence is intentional.
-_DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
+_DANGER = re.compile(r"[;&`<>\n\r]|\$[({]")   # $( command sub AND ${ (parity w/ _SUBST_META)
 
 
 def is_gated(cmd):
@@ -840,8 +875,7 @@ _PROTO = 2
 def _sock_path(sid):
     # Hash the session id so the socket path stays short — AF_UNIX paths are
     # capped (~104 bytes on macOS), and temp dirs + a UUID session id overflow.
-    h = hashlib.md5((sid or "default").encode()).hexdigest()[:12]
-    name = f"sethu-{h}-p{_PROTO}.sock"
+    name = f"sethu-{_sid_hash(sid)}-p{_PROTO}.sock"
     path = os.path.join(tempfile.gettempdir(), name)
     if len(path) > 100:  # leave margin under the limit
         path = os.path.join("/tmp", name)
@@ -1226,7 +1260,7 @@ How commands run:
   sethu --timeout 20       seconds a command may run before timing out
   sethu --maxlines 40      cap long output (0 = unlimited)
   sethu --prefix ">"       change the trigger
-  sethu --color off        plain result header (or NO_COLOR=1)
+  sethu --color off        uncolored result header (or NO_COLOR=1)
   sethu --plain on         `sethu:` prefix + words, no glyphs (screen readers)
 
   sethu --runner           show the full config with defaults
@@ -1285,7 +1319,9 @@ def gated_list_text(cfg):
     builtin = GATED | {"cd"} | _SAFE_STATE_BUILTINS
     names = textwrap.fill("  ".join(sorted(builtin)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
-    allowed = [str(x) for x in (cfg.get("allow") or [])]
+    # Strip non-printable chars (ESC/control) so an allow value can't inject terminal
+    # escapes into this listing (--runner already repr-escapes; this path didn't).
+    allowed = ["".join(c for c in str(x) if c.isprintable()) for x in (cfg.get("allow") or [])]
     yours = ("\n\nyou allowed (any flags of each):\n"
              + textwrap.fill("  ".join(sorted(allowed)), width=74,
                              initial_indent="  ", subsequent_indent="  ")
@@ -1490,7 +1526,7 @@ def main(argv=None):
 
 def _print_config(cfg):
     """Pretty-print the effective config (the `sethu` / `--runner` view)."""
-    trust_disp = "ON ⚠ gate off — everything runs" if cfg.get("trust") else "off (gated)"
+    trust_disp = "on ⚠ gate off — everything runs" if cfg.get("trust") else "off (gated)"
     ml = max_lines(cfg)
     print(f"config ({config_path()}):")   # the `sethu:`/icon lead is added by `_lead`
     print(f"  prefix:   {cfg['prefix']!r}   (default '>'; > run+block free, >> send to Claude)")

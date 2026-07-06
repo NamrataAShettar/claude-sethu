@@ -138,6 +138,12 @@ source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
   (`ls`, `cat`, `grep`, `jq`, …) runs; everything else — including tools that *can*
   write or exec (`git`, `find`, `npm`, …) — is refused until you `sethu --allow` that
   tool. No per-flag policing: a tool is either flag-safe (gated) or you allow it whole.
+- **Gated is a safe *default*, not a sandbox.** You can always run anything via
+  your terminal, `!`, `--allow`, or `--trust` — so it's a guardrail against
+  surprises, not a security boundary. (One consequence is noted in the limits below.)
+  The "flag-safe" property is a cwd/stateless guarantee — in **shell mode**, aliases and
+  `PATH` you set apply to later commands (as in any shell), so a gated tool resolves to
+  whatever you redefined.
 - **The runner executes in your shell without Claude Code's per-command
   permission prompts**, so keep the allowlist tight, like shell aliases. `--allow`-ing
   a launcher (`git`, `sh`, `python`, …) permits *any* of its flags — sethu warns you.
@@ -148,29 +154,8 @@ source your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
 - **Trust is the one safety knob.** `sethu --trust on` turns the gate off and runs
   anything with no guardrails at all. Off by default (= gated), warned loudly, shown as
   `⚠trust` while active.
-- **Gated is a safe *default*, not a sandbox.** You can always run anything via
-  your terminal, `!`, `--allow`, or `--trust` — so it's a guardrail against
-  surprises, not a security boundary. (One consequence is noted in the limits below.)
 
 ---
-
-## 🤝 Coexisting with other hooks
-
-sethu is a well-behaved `UserPromptSubmit` hook, and it installs cleanly alongside
-your others (hooks run **in parallel**, with no ordering dependence):
-
-- **Normal prompts** (not `>` / `>>` / `sethu`) pass straight through: sethu does
-  **nothing**, so your other hooks run exactly as they would without it.
-- **`>> cmd`** injects output as `additionalContext`, which Claude Code
-  **concatenates** with any other hook's context, so they stack rather than clash.
-- **`> cmd` / `sethu …`** blocks that one prompt (its purpose). Other hooks still
-  run their side effects, but the model doesn't (as intended).
-
-The only overlap to know about is another `UserPromptSubmit` hook that *also* acts
-on `>`-prefixed prompts. If two hooks both block the same prompt it stays blocked
-(fine), but Claude Code doesn't document how two block *reasons* are combined, so
-the shown result may merge them. That's rare in practice, since sethu only claims
-the `>` prefix.
 
 ## 🚧 When sethu *won't* work (the honest limits)
 
@@ -195,28 +180,44 @@ to do instead:
 
 ## 🛟 Troubleshooting
 
-**"UserPromptSubmit operation blocked by hook:" shows before my output.** That's
-normal, and it means it worked. Claude Code prints that wrapper around any prompt a
-hook handles locally; it's how sethu keeps your command out of the model. The
-`|^=^| [mode] ✓ exit 0` line below it is your actual result.
-
-**I typed `> cmd` but nothing ran, or Claude answered it instead.** You typed it
-while Claude was still generating. sethu only fires on a prompt that *starts* a
-turn, so a `>` typed mid-response is read by the model (and costs tokens), not run
-by sethu. Send `> cmd` when Claude is idle.
-
-**"`X` isn't in the gated set."** sethu is gated by default. The message tells you
-why (e.g. `git`/`npm` can write or run other programs, so they're not in the default
-set). To permit it, `sethu --allow X` (the whole tool). If it's interactive (`vim`, a bare REPL), use
-`sethu --launch "X"` instead (allowlisting can't make those run). To drop the
-guardrails entirely and run anything, there's `sethu --trust on`, but it's
-genuinely risky, so prefer allowlisting the specific commands you actually want.
-
-**"timed out after 20s."** Captured commands are capped under Claude Code's ~30s
-hook budget. Raise it a bit with `sethu --timeout`, or run long-lived commands
-(servers, `tail -f`) in a real terminal with `sethu --launch`.
+- **"UserPromptSubmit operation blocked by hook:" appears before my output** — that's
+  normal, and it means it worked. Claude Code prints that wrapper around any prompt a
+  hook handles locally; it's how sethu keeps your command out of the model. The
+  `|^=^| [mode] ✓ exit 0` line below it is your actual result.
+- **I typed `> cmd` but nothing ran (or Claude answered it instead)** — you typed it
+  while Claude was still generating. sethu only fires on a prompt that *starts* a turn,
+  so a `>` typed mid-response is read by the model (and costs tokens), not run by sethu.
+  Send `> cmd` when Claude is idle.
+- **"`X` isn't in the gated set."** — sethu is gated by default; the message tells you
+  why (e.g. `git`/`npm` can write or run other programs). To permit it, `sethu --allow X`
+  (the whole tool). If it's interactive (`vim`, a bare REPL), use `sethu --launch "X"`
+  instead (allowlisting can't make those run). To drop the guardrails entirely, there's
+  `sethu --trust on` — genuinely risky, so prefer allowlisting the specific tools you want.
+- **"timed out after 20s."** — captured commands are capped under Claude Code's ~30s hook
+  budget. Raise it with `sethu --timeout`, or run long-lived commands (servers, `tail -f`)
+  in a real terminal with `sethu --launch`.
 
 Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/issues).
+
+---
+
+## 🤝 Coexisting with other hooks
+
+sethu is a well-behaved `UserPromptSubmit` hook, and it installs cleanly alongside
+your others (hooks run **in parallel**, with no ordering dependence):
+
+- **Normal prompts** (not `>` / `>>` / `sethu`) pass straight through: sethu does
+  **nothing**, so your other hooks run exactly as they would without it.
+- **`>> cmd`** injects output as `additionalContext`, which Claude Code
+  **concatenates** with any other hook's context, so they stack rather than clash.
+- **`> cmd` / `sethu …`** blocks that one prompt (its purpose). Other hooks still
+  run their side effects, but the model doesn't (as intended).
+
+The only overlap to know about is another `UserPromptSubmit` hook that *also* acts
+on `>`-prefixed prompts. If two hooks both block the same prompt it stays blocked
+(fine), but Claude Code doesn't document how two block *reasons* are combined, so
+the shown result may merge them. That's rare in practice, since sethu only claims
+the `>` prefix.
 
 ---
 
