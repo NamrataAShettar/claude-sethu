@@ -39,3 +39,29 @@ jobs:
         run: pip install ruff
       - name: Lint (ruff — pyflakes + essential pycodestyle; see ruff.toml)
         run: ruff check hooks tests
+
+  # Guard the version field: nobody may hand-edit it (to a prior/unrelated value or at
+  # all). release-please is the ONLY thing that should change the version, and it updates
+  # the manifest + plugin.json + version.txt together — so any manual edit breaks this
+  # equality and fails the PR. See docs/versioning.md.
+  version-sync:
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: plugin.json / version.txt must match the release-please manifest
+        run: |
+          manifest=$(jq -r '."."' .release-please-manifest.json)
+          plugin=$(jq -r '.version' .claude-plugin/plugin.json)
+          vfile=$(tr -d '[:space:]' < version.txt)
+          echo "manifest=$manifest plugin.json=$plugin version.txt=$vfile"
+          fail=0
+          if [ "$plugin" != "$manifest" ]; then
+            echo "::error file=.claude-plugin/plugin.json::version ($plugin) != release-please manifest ($manifest). Do not hand-edit the version; release-please manages it. See docs/versioning.md."
+            fail=1
+          fi
+          if [ "$vfile" != "$manifest" ]; then
+            echo "::error file=version.txt::version ($vfile) != release-please manifest ($manifest). Do not hand-edit it; release-please manages it."
+            fail=1
+          fi
+          exit $fail
