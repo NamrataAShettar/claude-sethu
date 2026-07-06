@@ -67,6 +67,17 @@ with one, either don't make it or update this doc deliberately.
 - **Every feature and CLI argument has a test.** Tracked in the coverage table at
   the top of `tests/test_sethu.py`, enforced by `TestCoverageEnforcement` (fails if
   any arg is untested). Add a row + test for anything new.
+- **`docs/use-cases.md` is a contract, not decoration.** Every command shown there
+  must behave exactly as documented — a "gated / out of the box" example must run
+  without `--allow`, and an `--allow` / `--launch` / `--mode` example must work as
+  described. Any change to the gating set (`GATED`), `is_gated`, `_DANGER`, the chain
+  guard, `--allow` matching (`_matches`), interactive detection, or mode permissions
+  **MUST be re-checked against every use-case**, because those examples are what a new
+  user copies literally. (Real breakage: `> jq '.users | length' data.json` was refused
+  because `is_gated` split on `|` quote-*un*aware — a documented gated command that
+  didn't run.) When you change what's permitted, re-verify the doc and update it in the
+  **same** change; when a use-case can be pinned as a behavior test, prefer that over
+  trusting prose (see `TestGatedFn.test_pipe_inside_quotes_is_not_a_chain`).
 - **Validate values, not just types.** A hand-edited config must never crash or
   misbehave: coerce list entries to strings, fall back an invalid mode, reject an
   empty prefix, fall back malformed numbers.
@@ -170,6 +181,7 @@ with one, either don't make it or update this doc deliberately.
 - [ ] **Tested** — a test added/adjusted; coverage-table row updated; `TestCoverageEnforcement` green; full suite passes.
 - [ ] **UX** — opens with the `|^=^|` icon (so sethu is instantly recognizable), colorblind-safe & no new hue, truthful, actionable, plain language, no em-dashes.
 - [ ] **Correctness** — validates input, fails safe, doesn't rely on stale state.
+- [ ] **Use-cases** — every `docs/use-cases.md` example still behaves as documented (gated ones run, `--allow`/`--launch`/`--mode` ones work); doc updated in this change if permitted behavior changed.
 - [ ] **Security** — does it widen what runs? flags (not just names) audited? fails closed? trust still opt-in?
 - [ ] **Performance** — no new work on the every-prompt path; fast path still skips `_engine`.
 - [ ] **Storage** — output stays bounded; any new temp artifact is swept.

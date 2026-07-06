@@ -140,6 +140,21 @@ class TestGatedFn(unittest.TestCase):
         for c in ["env rm -rf x", "env FOO=1 sh -c id", "command rm -rf x"]:
             self.assertFalse(_engine.is_gated(c), c)
 
+    def test_pipe_inside_quotes_is_not_a_chain(self):
+        # A `|` INSIDE a quoted argument is literal text, not a shell pipe, so a gated
+        # tool with such an arg stays gated (use-cases.md UC 8: `jq '.users | length'`
+        # was wrongly refused by a naive `cmd.split("|")`).
+        for c in ['jq ".users | length" data.json', "jq '.a | .b' f.json",
+                  'grep "a|b" file', 'grep "x|y" f | wc -l']:
+            self.assertTrue(_engine.is_gated(c), c)
+
+    def test_real_pipe_to_non_gated_still_refused(self):
+        # The fix must NOT weaken the guard: an UNQUOTED pipe to a non-gated tool is
+        # still refused, and a real pipe of gated tools still runs.
+        self.assertFalse(_engine.is_gated('jq ".x" f | rm -rf ~'), "unquoted pipe to rm")
+        self.assertFalse(_engine.is_gated("cat f | sh"), "pipe to sh")
+        self.assertTrue(_engine.is_gated("cat f | grep x | head"), "gated pipeline")
+
     def test_why_refused_not_gated(self):
         # A non-gated tool's refusal names it and says it's not gated (the `--allow`
         # pointer is in the refusal's bullets, not this reason line).
