@@ -4,8 +4,11 @@ on:
   push:
     branches: [main]
     paths-ignore: ['**.md', 'LICENSE', '.gitignore']
+  # No paths-ignore on PRs: tests run on EVERY PR (even docs-only) so the `test` check
+  # always reports and can be a required status check in branch protection. Without this
+  # a docs-only PR would skip the check and, if it were required, block the merge forever.
+  # (Push to main still skips CI for doc-only changes, above.)
   pull_request:
-    paths-ignore: ['**.md', 'LICENSE', '.gitignore']
 
 jobs:
   test:
