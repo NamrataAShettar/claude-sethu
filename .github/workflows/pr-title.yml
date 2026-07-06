@@ -3,21 +3,27 @@ name: pr-title
 # Enforce Conventional-Commit PR titles. Because PRs are squash-merged, the PR title
 # becomes the commit on main, which is what release-please reads to decide the next
 # version. A title with no known type (fix/feat/…) would be silently ignored (no bump,
-# no changelog), so a real change could ship unversioned — this check fails the PR
-# instead, catching it before merge. See docs/versioning.md.
+# no changelog), so a real change could ship unversioned. This check fails the PR the
+# moment it's opened (or its title is edited) and posts an explanatory comment, so a bad
+# title is caught immediately instead of at release time. See docs/versioning.md.
+#
+# Make it blocking by requiring the `pr-title` check in the branch-protection rule for
+# `main` (a red check alone does not stop a merge without that).
 
 on:
   pull_request_target:
     types: [opened, edited, synchronize, reopened]
 
 permissions:
-  pull-requests: read
+  pull-requests: write
 
 jobs:
-  lint:
+  pr-title:
+    name: pr-title
     runs-on: ubuntu-latest
     steps:
       - uses: amannn/action-semantic-pull-request@v5
+        id: lint
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -34,3 +40,30 @@ jobs:
             style
             revert
           requireScope: false
+
+      # On failure, post (or update) a sticky comment on the PR explaining the fix, so
+      # the author sees a clear error at open time, not just a red check.
+      - if: always() && steps.lint.outputs.error_message != null
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-lint
+          message: |
+            ⚠️ **This PR title is not a valid [Conventional Commit](https://www.conventionalcommits.org).**
+
+            The title becomes the squash-merge commit, and release-please reads it to pick
+            the next version, so it must start with a type prefix:
+
+            - `fix: …` (patch) · `feat: …` (minor) · `feat!: …` or `BREAKING CHANGE:` (breaking)
+            - `docs:` · `chore:` · `test:` · `refactor:` · `ci:` (no release)
+
+            Edit the PR title to add a valid prefix and this check re-runs. Full guide:
+            `docs/versioning.md`.
+
+            <sub>Details: ${{ steps.lint.outputs.error_message }}</sub>
+
+      # Once the title is valid, remove the sticky comment.
+      - if: ${{ steps.lint.outputs.error_message == null }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-title-lint
+          delete: true
