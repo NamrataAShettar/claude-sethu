@@ -689,17 +689,44 @@ GATED = {
 _DANGER = re.compile(r"[;&`<>\n\r]|\$[({]")   # $( command sub AND ${ (parity w/ _SUBST_META)
 
 
+def _pipe_segments(cmd):
+    """Split `cmd` into pipeline segments on UNQUOTED `|` only, returning each segment's
+    token list. A `|` INSIDE a quoted argument (e.g. the filter in `jq '.users | length'`,
+    or `awk '{print $1 | "sort"}'`) is literal text, not a shell pipe, so it must not
+    split the command — a naive `cmd.split("|")` wrongly refused those. Uses the same
+    quote-aware tokenizer as the chain guard. Returns None on unbalanced quotes (caller
+    fails safe)."""
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars="|")
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return None
+    segs, cur = [], []
+    for tok in tokens:
+        if tok and set(tok) <= {"|"}:      # a pipe operator token (`|`, `||`)
+            segs.append(cur)
+            cur = []
+        else:
+            cur.append(tok)
+    segs.append(cur)
+    return segs
+
+
 def is_gated(cmd):
     """True if `cmd` is a pipeline of GATED tools with no chaining, redirection,
     command substitution, or backgrounding — i.e. it auto-runs without --allow when
     trust is off. No flag logic: a tool is gated only if it's harmless with ANY
     flags (that's the membership rule for GATED), so we just check the program name
     of each pipe segment. Pipes of gated tools are allowed (`_DANGER` doesn't block
-    `|`); everything else metacharacter-wise is refused."""
+    `|`); everything else metacharacter-wise is refused. The `|` split is quote-aware
+    (see `_pipe_segments`) so a pipe inside a quoted arg stays part of that arg."""
     if _DANGER.search(cmd):
         return False
-    for seg in cmd.split("|"):
-        toks = seg.split()
+    segs = _pipe_segments(cmd)
+    if segs is None:                      # unbalanced quotes → not gated (fail safe)
+        return False
+    for toks in segs:
         if not toks:                      # empty segment ⇒ `||`, trailing `|`, etc.
             return False
         if os.path.basename(toks[0]) not in GATED:

@@ -22,7 +22,9 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
     `_has_unquoted_ops` / `_SUBST_META` (the injection-hardened chain guard).
   - *per-session cwd (cwd mode)* — `is_cd`, `resolve_cd`, `set_cwd`/`get_cwd` (atomic).
   - *command execution* — gated decision (`is_gated`, `GATED` (flag-safe tool set,
-    no flag logic), `_DANGER`, `_LAUNCHERS`, `_why_refused`, `gated_list_text`);
+    no flag logic), `_DANGER`, `_pipe_segments` (quote-aware `|` split, so a pipe inside
+    a quoted arg like `jq '.a | .b'` isn't mistaken for a chain), `_LAUNCHERS`,
+    `_why_refused`, `gated_list_text`);
     interactive/TUI detection (`is_interactive`, `_REPL`,
     `_REPL_BATCH_FLAGS`, `INTERACTIVE`, `_looks_full_screen`); `run_capture` (the
     captured runner — streams via Popen, byte-capped at `MAX_CAPTURE_BYTES`, kills a
