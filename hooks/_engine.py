@@ -273,7 +273,8 @@ FIRST_RUN_HINT = (
     "• `>> grep -n TODO src/` → runs it AND sends the output to Claude (costs tokens).\n"
     "Works when Claude is idle (a `>` typed while Claude is thinking goes to the "
     "model). Safe tools (ls/cat/grep/jq…) work now; for git/find/npm/… run "
-    "`sethu --allow <tool>` once. Type `sethu` for the menu."
+    "`sethu --allow <tool>` once. Type `sethu` for the menu. Screen reader? "
+    "`sethu --plain on` for spoken-friendly output."
 )
 
 
