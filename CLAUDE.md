@@ -14,7 +14,10 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
   commands as a subprocess; `_block` emits the zero-token `decision:block`.
 - **`hooks/_engine.py`** — the core, in banner sections:
   - *config* — `DEFAULTS`, `load_config` (type + value coercion, whitespace-canonicalizes
-    allow/launch), `save_config`, `config_path`.
+    allow/launch), `save_config`/`set_cwd` (atomic via `_atomic_write`: temp+fsync+
+    os.replace, so a crash can't torn/truncate them), `_config_lock` (fcntl.flock
+    serializing the CLI's read-modify-write so concurrent writers don't lose updates),
+    `config_path`.
   - *allow / launch matching* — `_matches` (exact/prefix), `_is_chain_unsafe` /
     `_has_unquoted_ops` / `_SUBST_META` (the injection-hardened chain guard).
   - *per-session cwd (cwd mode)* — `is_cd`, `resolve_cd`, `set_cwd`/`get_cwd`.
@@ -31,8 +34,10 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
   - *the core: process one submitted prompt* — `process()` (the one entry that returns
     `{passthrough|block|context}`), plus the header/color helpers `_header`, `_reply`,
     `_msg`, `_c`, `_ANSI`, `ICON`.
-  - *management CLI* — `main`, `normalize_argv` (subcommand→flag aliasing), `_Parser`
-    (branded errors), `help_text`, `_print_config`.
+  - *management CLI* — `main` (wraps the read-modify-write in `_config_lock`),
+    `_apply_cli_mutations` (the per-flag config mutations, run under the lock;
+    `_announce_launch` opens a terminal AFTER the lock), `normalize_argv`
+    (subcommand→flag aliasing), `_Parser` (branded errors), `help_text`, `_print_config`.
 - **`hooks/_shelld.py`** — the persistent-shell daemon (PTY + unix-socket server) that
   backs shell mode; wire protocol version `_PROTO`. On a command timeout it verifies the
   shell recovered (`_probe`/`_recover`: Ctrl-C → SIGKILL the foreground pgrp → respawn on

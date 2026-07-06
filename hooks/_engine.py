@@ -20,6 +20,7 @@ This file is both the importable engine (used by the hook) and the management
 CLI (`sethu --allow ...`, `--mode ...`, `--runner`).
 """
 import argparse
+import contextlib
 import glob
 import hashlib
 import json
@@ -323,14 +324,74 @@ def load_config():
     return cfg
 
 
+def _atomic_write(path, text):
+    """Write `text` to `path` atomically: a temp file in the same dir, fsync, then
+    os.replace. A reader always sees the old OR new complete file (never a torn one),
+    and a crash/kill mid-write can't truncate the real file — the temp is discarded and
+    the original stays intact. os.replace also defuses a symlink planted at `path` (it
+    swaps the name, doesn't follow it). Temp is 0600 (mkstemp), so `path` ends up
+    owner-only. Fixes the config torn-read / crash-wipe and the cwd-file nit."""
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".sethu-tmp-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+@contextlib.contextmanager
+def _config_lock():
+    """Serialize the CLI's read-modify-write of the config so two concurrent
+    `sethu --…` writers don't clobber each other (a lost `--allow`, race A3). An
+    exclusive fcntl.flock on `<config>.lock`, held across load→mutate→save; the kernel
+    releases it if the writer dies. Blocks so the loser re-reads the winner's write.
+    fcntl is imported lazily (absent on Windows → no-op, degrade to last-writer-wins);
+    an unlockable dir also degrades rather than failing the command."""
+    fd = None
+    try:
+        import fcntl
+    except ImportError:
+        fcntl = None
+    if fcntl is not None:
+        try:
+            os.makedirs(os.path.dirname(config_path()) or ".", exist_ok=True)
+            fd = os.open(config_path() + ".lock", os.O_CREAT | os.O_WRONLY, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                fd = None
+    try:
+        yield
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
 def save_config(cfg):
     """Write the known config keys to the config file (creating its dir), as
-    pretty-printed JSON. Only DEFAULTS keys are persisted."""
-    path = config_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump({k: cfg[k] for k in DEFAULTS}, f, indent=2)
-        f.write("\n")
+    pretty-printed JSON, atomically. Only DEFAULTS keys are persisted."""
+    _atomic_write(config_path(),
+                  json.dumps({k: cfg[k] for k in DEFAULTS}, indent=2) + "\n")
 
 
 # ── allow / launch matching ───────────────────────────────────────────────────
@@ -406,8 +467,7 @@ def get_cwd(sid, default):
 
 def set_cwd(sid, path):
     try:
-        with open(_cwd_file(sid), "w") as f:
-            f.write(path)
+        _atomic_write(_cwd_file(sid), path)   # atomic: a crash can't truncate it
     except Exception:
         pass
 
@@ -1170,58 +1230,15 @@ def gated_list_text(cfg):
     )
 
 
-def main(argv=None):
-    args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
-    if not args_list:
-        print(help_text())
-        return
-
-    p = _Parser(
-        prog="sethu", description="sethu: run terminal commands from Claude's prompt box",
-        epilog=help_text(), formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument("--allow", metavar="CMD", help="allow a command for the runner")
-    p.add_argument("--unallow", metavar="CMD", help="remove a command from the allowlist")
-    p.add_argument("--launch", metavar="CMD", help="add a command to open in a terminal")
-    p.add_argument("--unlaunch", metavar="CMD", help="remove a command from the launch list")
-    p.add_argument("--mode", choices=MODES, help="set statefulness mode")
-    p.add_argument("--prefix", help="set the trigger prefix (default '>')")
-    p.add_argument("--gated-list", action="store_true", dest="gated_list",
-                   help="list the tools that run without asking: built-in defaults + ones you've --allow'd")
-    p.add_argument("--trust", choices=["on", "off"],
-                   help="off (default) = gated; on = run ANY command, gate off (footgun)")
-    p.add_argument("--rc", choices=["on", "off"],
-                   help="in shell mode, source your shell rc (aliases/functions/env)")
-    p.add_argument("--color", choices=["on", "off"],
-                   help="color the result header (default on; NO_COLOR also disables)")
-    p.add_argument("--maxlines", metavar="N", type=int,
-                   help="truncate output beyond N lines (full output saved to a file); 0 = unlimited")
-    p.add_argument("--timeout", metavar="SECONDS", type=int,
-                   help="seconds a command may run before it's timed out (default 20)")
-    p.add_argument("--restart", action="store_true",
-                   help="restart the persistent shell(s) (clears shell-mode state)")
-    p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
-    a = p.parse_args(args_list)
-
-    if a.gated_list:
-        print(gated_list_text(load_config()))
-        return
-    if a.restart:
-        print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
-        return
-    if a.rc:
-        cfg = load_config()
-        cfg["rc"] = (a.rc == "on")
-        save_config(cfg)
-        kill_daemons()  # restart so the new shell takes effect
-        extra = (" — your shell's aliases/functions/env now load in shell mode"
-                 if cfg["rc"] else "")
-        print(f"✔ rc: {a.rc} (shell restarted){extra}")
-        return
-
-    cfg = load_config()
+def _apply_cli_mutations(a, cfg):
+    """Apply the CLI's config mutations to `cfg` (called under `_config_lock` after a
+    fresh `load_config`, so concurrent writers don't clobber). Prints per-change
+    feedback and returns (changed, noop): changed → the caller saves; noop → we already
+    printed a 'nothing changed' message, so don't dump the config."""
     changed = False
     noop = False  # printed truthful feedback but changed nothing → don't dump config
+    launch_val = None  # a terminal to open AFTER the lock (see main) — never open one
+                       # while holding the config lock (it can block on a macOS prompt)
     if a.allow is not None:
         # Canonicalize whitespace so `--allow "a   b"` and `unallow a b` are the
         # same entry (the subcommand path already collapses spaces); a stored entry
@@ -1245,23 +1262,12 @@ def main(argv=None):
             print("nothing to launch (the command was empty)."); noop = True
         else:
             # "launch" is a verb — open it now, not just register it. From here on
-            # `> <val>` opens a terminal too (that's what the launch list is for).
+            # `> <val>` opens a terminal too (that's what the launch list is for). The
+            # list write happens under the lock; the terminal open is deferred to main.
             if val not in cfg["launch"]:
                 cfg["launch"].append(val)
             changed = True
-            status = launch_in_terminal(val)
-            note = ("  Note: the launched terminal is a plain shell: it does NOT "
-                    "share sethu's allowlist / mode / cwd.")
-            if status:
-                print(f"✔ launched {val!r} ({status}) AND added it to the launch list. "
-                      f"That's persistent, so from now on `> {val}` opens a terminal "
-                      f"instead of running captured. Undo with `sethu --unlaunch "
-                      f"{val!r}`.\n{note}")
-            else:
-                print(f"✔ added {val!r} to the launch list (persistent), so from now on "
-                      f"`> {val}` opens a terminal. Couldn't open one right now (no tmux "
-                      f"pane; auto-open is macOS/tmux only), so run `{val}` in your "
-                      f"terminal. Undo with `sethu --unlaunch {val!r}`.\n{note}")
+            launch_val = val
     for field, key, name in (("unallow", "allow", "allowlist"),
                              ("unlaunch", "launch", "launch list")):
         val = getattr(a, field)
@@ -1309,8 +1315,89 @@ def main(argv=None):
         else:
             print("✔ trust: off — gated again (only safe tools + your --allow'd run).")
         changed = True
+    return changed, noop, launch_val
+
+
+def _announce_launch(val):
+    """Open `val` in a terminal and print the result. Called OUTSIDE the config lock so
+    a terminal launch that blocks (e.g. a macOS automation-permission prompt) can't hold
+    up other concurrent `sethu --…` writers."""
+    status = launch_in_terminal(val)
+    note = ("  Note: the launched terminal is a plain shell: it does NOT "
+            "share sethu's allowlist / mode / cwd.")
+    if status:
+        print(f"✔ launched {val!r} ({status}) AND added it to the launch list. "
+              f"That's persistent, so from now on `> {val}` opens a terminal "
+              f"instead of running captured. Undo with `sethu --unlaunch "
+              f"{val!r}`.\n{note}")
+    else:
+        print(f"✔ added {val!r} to the launch list (persistent), so from now on "
+              f"`> {val}` opens a terminal. Couldn't open one right now (no tmux "
+              f"pane; auto-open is macOS/tmux only), so run `{val}` in your "
+              f"terminal. Undo with `sethu --unlaunch {val!r}`.\n{note}")
+
+
+def main(argv=None):
+    args_list = normalize_argv(sys.argv[1:] if argv is None else argv)
+    if not args_list:
+        print(help_text())
+        return
+
+    p = _Parser(
+        prog="sethu", description="sethu: run terminal commands from Claude's prompt box",
+        epilog=help_text(), formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--allow", metavar="CMD", help="allow a command for the runner")
+    p.add_argument("--unallow", metavar="CMD", help="remove a command from the allowlist")
+    p.add_argument("--launch", metavar="CMD", help="add a command to open in a terminal")
+    p.add_argument("--unlaunch", metavar="CMD", help="remove a command from the launch list")
+    p.add_argument("--mode", choices=MODES, help="set statefulness mode")
+    p.add_argument("--prefix", help="set the trigger prefix (default '>')")
+    p.add_argument("--gated-list", action="store_true", dest="gated_list",
+                   help="list the tools that run without asking: built-in defaults + ones you've --allow'd")
+    p.add_argument("--trust", choices=["on", "off"],
+                   help="off (default) = gated; on = run ANY command, gate off (footgun)")
+    p.add_argument("--rc", choices=["on", "off"],
+                   help="in shell mode, source your shell rc (aliases/functions/env)")
+    p.add_argument("--color", choices=["on", "off"],
+                   help="color the result header (default on; NO_COLOR also disables)")
+    p.add_argument("--maxlines", metavar="N", type=int,
+                   help="truncate output beyond N lines (full output saved to a file); 0 = unlimited")
+    p.add_argument("--timeout", metavar="SECONDS", type=int,
+                   help="seconds a command may run before it's timed out (default 20)")
+    p.add_argument("--restart", action="store_true",
+                   help="restart the persistent shell(s) (clears shell-mode state)")
+    p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
+    a = p.parse_args(args_list)
+
+    if a.gated_list:
+        print(gated_list_text(load_config()))
+        return
+    if a.restart:
+        print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
+        return
+    if a.rc:
+        with _config_lock():
+            cfg = load_config()
+            cfg["rc"] = (a.rc == "on")
+            save_config(cfg)
+        kill_daemons()  # restart so the new shell takes effect
+        extra = (" — your shell's aliases/functions/env now load in shell mode"
+                 if cfg["rc"] else "")
+        print(f"✔ rc: {a.rc} (shell restarted){extra}")
+        return
+
+    # Serialize the read-modify-write so two concurrent `sethu --…` writers don't
+    # clobber each other (race A3); load happens INSIDE the lock so we mutate the
+    # latest config, and save (atomic) is inside too.
+    with _config_lock():
+        cfg = load_config()
+        changed, noop, launch_val = _apply_cli_mutations(a, cfg)
+        if changed:
+            save_config(cfg)
+    if launch_val is not None:
+        _announce_launch(launch_val)   # open the terminal AFTER releasing the lock
     if changed:
-        save_config(cfg)
         return
     if noop:
         return  # we already said "already allowed" / "not in list" / "nothing to …"

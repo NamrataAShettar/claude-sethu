@@ -52,6 +52,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   timeout recovery (no wedge/bleed) H3   TestShellMode                          [x]
   output byte-cap (RAM/disk) ST1/ST7     TestOutputCap / TestShellMode          [x]
   daemon-spawn lock (L7, flock) / marker  TestSpawnLock / TestFirstRunHint       [x]
+  config/cwd durability (atomic+flock)    TestConfigDurability                   [x]
   first-run welcome hint                 TestFirstRunHint                       [x]
   hook fast-path gate                    TestHookGate                           [x]
   hook output JSON shapes                TestHookOutput                         [x]
@@ -1237,6 +1238,63 @@ class TestSpawnLock(Base):
         fd = _engine._acquire_spawn_lock(sock)
         self.assertIsNotNone(fd)
         _engine._release_spawn_lock(fd)
+
+
+class TestConfigDurability(Base):
+    """Config/cwd durability: atomic write (A1 torn read / A2 crash-wipe / B cwd file)
+    + flock on the CLI read-modify-write (A3 lost update)."""
+
+    def _read(self, p):
+        with open(p) as f:
+            return f.read()
+
+    def _no_temp(self, d):
+        self.assertEqual([n for n in os.listdir(d) if n.startswith(".sethu-tmp-")], [])
+
+    def test_atomic_write_roundtrip_no_temp_left(self):
+        p = os.path.join(self.tmp, "f.txt")
+        _engine._atomic_write(p, "hello\n")
+        self.assertEqual(self._read(p), "hello\n")
+        self._no_temp(self.tmp)
+
+    def test_atomic_write_failure_keeps_original(self):
+        from unittest import mock
+        p = os.path.join(self.tmp, "f.txt")
+        _engine._atomic_write(p, "original")
+        with mock.patch("os.replace", side_effect=OSError("boom")):
+            with self.assertRaises(OSError):
+                _engine._atomic_write(p, "SHOULD-NOT-LAND")
+        self.assertEqual(self._read(p), "original")      # never torn/replaced
+        self._no_temp(self.tmp)                          # temp cleaned up
+
+    def test_save_config_is_atomic_and_valid(self):
+        self.write(allow=["ls"])
+        _engine.save_config(_engine.load_config())
+        with open(self.cfg) as f:
+            json.load(f)                                 # complete valid JSON
+        self._no_temp(os.path.dirname(self.cfg))
+
+    def test_config_lock_releases(self):
+        # Two sequential locks must not deadlock (proves release, and no fcntl crash).
+        with _engine._config_lock():
+            pass
+        with _engine._config_lock():
+            pass
+
+    def test_concurrent_writers_lose_no_update(self):
+        # A3: N racing `sethu --allow tool{i}` — flock serializes the RMW so every
+        # entry survives (last-writer-wins would drop some).
+        import subprocess as sp
+        self.write(allow=[])
+        env = dict(os.environ, SETHU_CONFIG=self.cfg)
+        procs = [sp.Popen([sys.executable, _engine.__file__, "--allow", f"tool{i}"],
+                          env=env, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+                 for i in range(12)]
+        for pr in procs:
+            pr.wait()
+        allow = _engine.load_config()["allow"]
+        for i in range(12):
+            self.assertIn(f"tool{i}", allow)
 
 
 class TestConfig(Base):

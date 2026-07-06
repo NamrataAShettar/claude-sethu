@@ -182,6 +182,7 @@ to do instead:
 | **Interactive programs** (`vim`, `top`, `ssh`, a bare REPL) | The runner has no terminal, so they'd hang. | `sethu --launch "vim"` opens a real pane. |
 | **Commands that prompt for input** (`npm install` conflicts, `apt install` "[Y/n]", `gh auth login`) | Even shell mode can't *type back* at a prompt. | Use non-interactive flags (`-y`, `--yes`, `DEBIAN_FRONTEND=noninteractive`) or `--launch`. |
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
+| **Different modes in two sessions at once** | Settings (mode, allowlist, trust) live in one shared config, so `sethu --mode` / `--allow` apply to **all** your Claude sessions. (Each session's working dir and `shell` bash stay separate.) | Set the mode you need for now; you can't run one session in `shell` and another in `cwd` simultaneously. |
 | **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
 | **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …) — git's behavior, same as your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
