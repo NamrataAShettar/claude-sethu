@@ -89,7 +89,12 @@ def main():
         that (a header/help/error already embeds it), so it's never doubled. Every
         user-facing emission below routes through this."""
         first = text.split("\n", 1)[0]
-        if ICON in first or (plain and first.startswith("sethu:")):
+        # Anchor the "already branded, don't double" check to the LEAD, not anywhere in
+        # the line — else a user value that merely CONTAINS the icon (e.g. `--prefix
+        # "|^=^|"` echoed mid-line) would suppress the real leading icon. The lead may be
+        # the colored form (help/_Parser.error) or the raw glyph (NO_COLOR).
+        led = first.startswith(ICON) or first.startswith(_c(ICON, "icon", on))
+        if led or (plain and first.startswith("sethu:")):
             return text
         if plain:
             return f"sethu: {text}"

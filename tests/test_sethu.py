@@ -1648,7 +1648,8 @@ class TestEveryResponseLeadsWithIcon(Base):
             ("sethu --definitelynotaflag", {}),       # argparse error
             ("sethu", {}),                            # help menu
             ('sethu allow "oops', {}),                # mismatched quotes
-        ]
+            ('sethu --prefix "|^=^|"', {}),           # F1: a value CONTAINING the icon
+        ]                                             #     must still get a leading icon
         for prompt, cfg in cases:
             txt = self._user_text(prompt, **cfg)
             self.assertTrue(txt.startswith(lead),

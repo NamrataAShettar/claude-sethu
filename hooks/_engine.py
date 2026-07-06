@@ -218,10 +218,17 @@ def _sweep_temp(now, force=False):
                 return  # swept recently — skip the directory scan
         except OSError:
             pass  # no sentinel yet → sweep now and create it
+    # Predictable name in a shared tmp dir → never follow a symlink (a planted link
+    # could redirect the mtime bump, or worse). Open the existing sentinel O_NOFOLLOW
+    # and utime the fd; if it's absent (or IS a symlink) create it fresh, also O_NOFOLLOW.
     try:
-        os.utime(sentinel, (now, now))
+        fd = os.open(sentinel, os.O_WRONLY | os.O_NOFOLLOW)
+        try:
+            os.utime(fd, (now, now))
+        finally:
+            os.close(fd)
     except OSError:
-        try:   # predictable name in a shared tmp dir → O_NOFOLLOW, don't follow a symlink
+        try:
             os.close(os.open(sentinel, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW, 0o600))
         except OSError:
             pass
@@ -242,6 +249,21 @@ def _sweep_temp(now, force=False):
         try:
             if now - e.stat().st_mtime > _TEMP_MAX_AGE:
                 os.unlink(e.path)
+        except OSError:
+            pass
+    # _atomic_write creates `.sethu-tmp-*` next to its TARGET, so the config's temps land
+    # in the config dir (~/.claude), not `tmp` — sweep that dir too (a crash between
+    # mkstemp and os.replace could orphan one). Skip if it's the same dir we just scanned.
+    cfg_dir = os.path.dirname(config_path())
+    if cfg_dir and os.path.realpath(cfg_dir) != os.path.realpath(tmp):
+        try:
+            for e in os.scandir(cfg_dir):
+                if e.name.startswith(".sethu-tmp-"):
+                    try:
+                        if now - e.stat().st_mtime > _TEMP_MAX_AGE:
+                            os.unlink(e.path)
+                    except OSError:
+                        pass
         except OSError:
             pass
 
@@ -638,6 +660,12 @@ def is_interactive(cmd):
 # can make it write/delete a file or execute another program. So there is deliberately
 # NO per-flag policing; a tool is either flag-safe (here) or it isn't (use --allow to
 # opt into its full surface, at your discretion).
+# SCOPE: this "flag-safe" property is per-command and holds in cwd/stateless (each command
+# is a fresh subprocess). In SHELL mode it can be voided by the user's OWN prior state —
+# `alias ls=…` or `export PATH=…` (both auto-run) redefine what a later gated name resolves
+# to. That's inherent to a persistent shell you're configuring (same as any terminal), not
+# a sethu escalation, and it needs the user to run that alias/export themselves; documented
+# in README §Safety + design-guidelines. NOT a per-invocation guarantee in shell mode.
 # Deliberately EXCLUDED because a flag/operand CAN write or exec: git (config/alias
 # exec + writing subcommands), find (-exec/-delete), fd (-x), rg (--pre), sort (-o),
 # uniq / xxd (positional output-file operand), yq (-i), tree (-o), file (-C); and the
@@ -657,7 +685,7 @@ GATED = {
 # regex on the whole string: gated mode is a conservative curated fast-path, so
 # it deliberately rejects even a quoted `;` (`echo "a;b"`). The allowlist path
 # (`_is_chain_unsafe`) is the quote-aware one — the divergence is intentional.
-_DANGER = re.compile(r"[;&`<>\n\r]|\$\(")
+_DANGER = re.compile(r"[;&`<>\n\r]|\$[({]")   # $( command sub AND ${ (parity w/ _SUBST_META)
 
 
 def is_gated(cmd):
@@ -1291,7 +1319,9 @@ def gated_list_text(cfg):
     builtin = GATED | {"cd"} | _SAFE_STATE_BUILTINS
     names = textwrap.fill("  ".join(sorted(builtin)), width=74,
                           initial_indent="  ", subsequent_indent="  ")
-    allowed = [str(x) for x in (cfg.get("allow") or [])]
+    # Strip non-printable chars (ESC/control) so an allow value can't inject terminal
+    # escapes into this listing (--runner already repr-escapes; this path didn't).
+    allowed = ["".join(c for c in str(x) if c.isprintable()) for x in (cfg.get("allow") or [])]
     yours = ("\n\nyou allowed (any flags of each):\n"
              + textwrap.fill("  ".join(sorted(allowed)), width=74,
                              initial_indent="  ", subsequent_indent="  ")
