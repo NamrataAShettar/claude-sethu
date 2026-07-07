@@ -1441,7 +1441,7 @@ def _apply_cli_mutations(a, cfg):
         if val is not None:
             val = " ".join(val.split())
             if not val:
-                print(f"nothing to remove (the command was empty)."); noop = True
+                print("nothing to remove (the command was empty)."); noop = True
             elif val in cfg[key]:
                 cfg[key].remove(val)
                 print(f"✔ removed from {key}: {val!r}"); changed = True

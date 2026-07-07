@@ -92,10 +92,20 @@ from the code. A stale map is worse than none.
   use `/reload-plugins`).
 
 ## Release
-Bump `version` in `.claude-plugin/plugin.json`, push, then refresh the marketplace
-clone (`git -C ~/.claude/plugins/marketplaces/sethu pull origin main`). Users update
-via `/plugin marketplace update sethu` + `/plugin update sethu`. CI `paths-ignore`s
-docs, so doc-only pushes skip tests.
+Versioning is automated by **release-please** (`.github/workflows/release-please.yml`
++ `release-please-config.json` + `.release-please-manifest.json`). **Do NOT hand-edit
+`version` in `.claude-plugin/plugin.json`** — release-please bumps it (and `version.txt`)
+from Conventional-Commit history and maintains `CHANGELOG.md`.
+
+Flow: land changes on main with a **Conventional Commit** message. PRs are
+**squash-merged, so the PR title becomes the commit** — title PRs `fix: …` (→ patch),
+`feat: …` (→ minor), or `feat!: …` / a `BREAKING CHANGE:` footer (→ minor while
+pre-1.0, per `bump-minor-pre-major`). `chore:`/`docs:`/`test:`/`refactor:`/`ci:` don't
+trigger a release. release-please opens/updates a "chore(main): release x.y.z" PR;
+**merge that PR** to bump the version, tag `vX.Y.Z`, and cut a GitHub release. Then
+refresh the marketplace clone (`git -C ~/.claude/plugins/marketplaces/sethu pull origin
+main`); users update via `/plugin marketplace update sethu` + `/plugin update sethu`.
+CI `paths-ignore`s docs, so doc-only pushes skip tests.
 
 ## Commits
 End commit messages with:
