@@ -136,20 +136,22 @@ Config lives in `~/.claude/sethu.json`.
 
 ## 🛡️ Safety
 
-- **Gated by default.** Only tools that can't write or exec with *any* flags
-  (`ls`, `cat`, `grep`, `jq`, …) run on their own; anything that can (`git`, `find`,
-  `npm`, …) waits for `sethu --allow`. A tool is gated whole or allowed whole, no
-  per-flag policing.
-- **A guardrail, not a sandbox.** You can always bypass it via your own terminal, or
-  by widening the gate with `--allow` or `--trust`. Flag-safety is per-command too: in
-  **shell mode** an `alias` or `PATH` you set can change what a later gated name runs.
-- **The runner executes in your shell without Claude Code's per-command
-  permission prompts**, so keep the allowlist tight, like shell aliases. `--allow`-ing
-  a launcher (`git`, `sh`, `python`, …) permits *any* of its flags; sethu warns you.
-- **Injection-hardened.** An allowed/gated tool may only be followed by plain
-  arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or substitution.
-  Allowing `ls` does **not** allow `> ls; rm -rf ~`. (Metacharacters *inside
-  quotes* are fine, so once `python3` is allowed, `> python3 -c "import os; print(1)"` works.)
+- **Gated by default.** Only tools that can't write files or run other programs,
+  whatever the flags (`ls`, `cat`, `grep`, `jq`, …), run automatically; anything that
+  can (`git`, `find`, `npm`, …) waits for `sethu --allow`. sethu judges the whole tool,
+  not individual flags: it's allowed entirely or not at all.
+- **A guardrail, not a sandbox.** You can always bypass it: your own terminal, or
+  widening the gate with `--allow` or `--trust`. (In **shell mode**, an alias or `PATH`
+  you set sticks, so a later command runs whatever you redefined it to, exactly like a
+  normal shell.)
+- **Runs in your shell, no per-command prompts.** sethu executes commands directly,
+  with no Claude Code "allow this?" popup, so keep the allowlist tight, like shell
+  aliases. Allowing a tool that can run other programs (`git`, `sh`, `python`, …)
+  permits *all* of its flags; sethu warns you when you do.
+- **Injection-hardened.** An allowed or gated command may only be followed by plain
+  arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or `$(…)`. Allowing
+  `ls` does **not** allow `> ls; rm -rf ~`. (Those special characters *inside quotes*
+  are fine, so once `python3` is allowed, `> python3 -c "import os; print(1)"` works.)
 - **Trust is the one safety knob.** `sethu --trust on` turns the gate off and runs
   anything with no guardrails at all. Off by default (= gated), warned loudly, shown as
   `⚠trust` while active.
