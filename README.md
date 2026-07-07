@@ -57,8 +57,8 @@ to spot.
 **Requirements:**
 
 - [Claude Code](https://claude.com/claude-code).
-- **`python3`** on your `PATH`. sethu's hooks run it, so it's required. Check with
-  `python3 --version`. If it's missing (recent macOS doesn't ship it by default),
+- **`python3` (3.9 or newer)** on your `PATH`. sethu's hooks run it, so it's
+  required. Check with `python3 --version`. If it's missing (recent macOS doesn't ship it by default),
   install via [Homebrew](https://brew.sh) (`brew install python`), the Xcode
   Command Line Tools (`xcode-select --install`), or
   [python.org](https://www.python.org/downloads/). Most Linux distros already
