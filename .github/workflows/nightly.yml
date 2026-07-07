@@ -1,0 +1,47 @@
+name: nightly
+
+# A daily canary. The code is deterministic and the tools are pinned, so re-running
+# the suite mostly re-confirms green — its value is catching ENVIRONMENT drift before a
+# user does: a new Python release (the newest matrix leg floats), a GitHub runner-image
+# change, or a GitHub-owned action changing behavior. GitHub emails the owner on failure.
+# Not a PR gate (runs on schedule only), so it never blocks a merge.
+#
+# Gotchas: scheduled workflows run only on the DEFAULT branch, and GitHub auto-disables a
+# schedule after ~60 days of repo inactivity — workflow_dispatch below lets you re-trigger
+# it manually and keep it warm.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'   # 06:17 UTC daily (off the top of the hour, which is congested)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: true
+
+jobs:
+  health:
+    # Don't run in forks (a fork that enables Actions would otherwise inherit the cron).
+    if: github.repository == 'NamrataAShettar/claude-sethu'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate Python syntax
+        run: python -m compileall -q hooks
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+      - name: Install ruff
+        run: pip install ruff==0.15.20
+      - name: Lint
+        run: ruff check hooks tests
