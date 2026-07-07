@@ -1,21 +1,88 @@
-name: tests
+name: ci
 
 on:
   push:
     branches: [main]
     paths-ignore: ['**.md', 'LICENSE', '.gitignore']
+  # PRs: no paths-ignore, so `test`/`lint`/`version-sync` report on every PR (even
+  # docs-only) and can be required status checks. Each job is gated on draft state
+  # below, so while a PR is a draft the checks are skipped (no run per work-in-progress
+  # commit); they run when the PR is opened non-draft or marked "ready for review". A
+  # draft can't be merged anyway, so a required check skipped in draft state never blocks.
   pull_request:
-    paths-ignore: ['**.md', 'LICENSE', '.gitignore']
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Least privilege: the default token is read-only. Jobs here only need to read the repo
+# (they run untrusted fork-PR code on a public repo, so no write scope).
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref (e.g. rapid re-pushes to a PR) so stale jobs
+# don't keep burning Actions minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    # Run on any push, and on a PR only when it is NOT a draft (ready for review).
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Test the supported floor (3.9) and a current release. "pure stdlib, runs on
+        # whatever python3 you have" is only true if CI checks the floor, not just latest.
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Validate Python syntax
+        run: python -m compileall -q hooks
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+  lint:
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Validate Python syntax
-        run: python -m compileall -q hooks
-      - name: Run tests
-        run: python -m unittest discover -s tests -v
+      # Pin ruff: an unpinned ruff can add rules and redden a previously-green PR.
+      - name: Install ruff
+        run: pip install ruff==0.15.20
+      - name: Lint (ruff — pyflakes + essential pycodestyle; see ruff.toml)
+        run: ruff check hooks tests
+
+  # Guard the version field: nobody may hand-edit it (to a prior/unrelated value or at
+  # all). release-please is the ONLY thing that should change the version, and it updates
+  # the manifest + plugin.json + version.txt together — so any manual edit breaks this
+  # equality and fails the PR. See docs/versioning.md.
+  version-sync:
+    if: github.event_name == 'push' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: plugin.json / version.txt must match the release-please manifest
+        run: |
+          manifest=$(jq -r '."."' .release-please-manifest.json)
+          plugin=$(jq -r '.version' .claude-plugin/plugin.json)
+          vfile=$(tr -d '[:space:]' < version.txt)
+          echo "manifest=$manifest plugin.json=$plugin version.txt=$vfile"
+          fail=0
+          if [ "$plugin" != "$manifest" ]; then
+            echo "::error file=.claude-plugin/plugin.json::version ($plugin) != release-please manifest ($manifest). Do not hand-edit the version; release-please manages it. See docs/versioning.md."
+            fail=1
+          fi
+          if [ "$vfile" != "$manifest" ]; then
+            echo "::error file=version.txt::version ($vfile) != release-please manifest ($manifest). Do not hand-edit it; release-please manages it."
+            fail=1
+          fi
+          exit $fail
