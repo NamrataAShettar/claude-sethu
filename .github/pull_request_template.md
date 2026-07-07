@@ -12,11 +12,20 @@ Full guide: docs/versioning.md
 
 ## What and why
 
+<!-- Closes #<issue> if this resolves one. -->
+
+
+## How verified
+
+<!-- Automated tests, plus any live-testing per docs/testing.md — the suite does NOT
+cover --launch, shell mode, or macOS, so note manual verification for those. -->
 
 
 ## Checklist
 
 - [ ] PR title is a Conventional Commit (`fix:` / `feat:` / `docs:` / `chore:` / …)
 - [ ] Tests added or updated; `python3 -m unittest discover -s tests` passes
+- [ ] Security: does this change what auto-runs, or widen the gate / allowlist? If so, it's been audited.
 - [ ] `docs/use-cases.md` still accurate if gating / permissions changed
+- [ ] `CLAUDE.md` code-map updated if a function, section, or file moved
 - [ ] Checked against `docs/design-guidelines.md`
