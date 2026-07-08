@@ -28,8 +28,11 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
     interactive/TUI detection (`is_interactive`, `_REPL`,
     `_REPL_BATCH_FLAGS`, `INTERACTIVE`, `_looks_full_screen`); `run_capture` (the
     captured runner — streams via Popen, byte-capped at `MAX_CAPTURE_BYTES`, kills a
-    runaway); truncation + temp hygiene (`_truncate`, `_out_path`, `_sweep_temp`,
-    `_output_path`); `launch_in_terminal` + `_launch_command_script`.
+    runaway); truncation + temp hygiene (`_truncate`, `_out_path`, `_sweep_temp`
+    (7-day GC of sethu's `/tmp` files — output logs, launch scripts, sockets, cwd/lock
+    files; throttled to ~1/hr by the mtime of an empty `/tmp/sethu-swept` sentinel,
+    opened `O_NOFOLLOW`, so it doesn't rescan `/tmp` every command), `_output_path`);
+    `launch_in_terminal` + `_launch_command_script`.
   - *persistent shell (shell mode)* — `shell_run`, `_sock_path`, `_spawn_daemon`
     (+ `_acquire_spawn_lock`/`_release_spawn_lock`, the L7 spawn guard), `kill_daemons`,
     `_timeout_msg` (talks to `_shelld.py`).
