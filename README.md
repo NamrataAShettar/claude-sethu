@@ -75,12 +75,12 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
   [python.org](https://www.python.org/downloads/). Most Linux distros already
   include it. (If it's missing, sethu tells you at session start and stays out of
   your way, so your prompts still work normally, rather than erroring.)
-- **macOS or Linux (WSL on Windows).** The plain `>` / `cwd` / `stateless` runner is
-  fully portable. **Shell mode** needs Unix (PTY + sockets): macOS, Linux, or WSL.
-  **`--launch` opens a terminal only on macOS or inside `tmux`.** On plain Linux or WSL
-  without tmux, **`--launch` can't open a terminal for you** (no native Linux-terminal
-  support yet), so run interactive/long-running commands in your own terminal, or start
-  `tmux` first.
+- **Platform.** The plain `>` / `cwd` / `stateless` runner works everywhere. Shell mode and
+  `--launch` are the only OS-sensitive parts:
+  - **macOS:** both work.
+  - **Linux:** shell mode works. **`--launch` needs `tmux`** (no native Linux-terminal
+    support yet). Without tmux, run the command in your own terminal.
+  - **Windows:** use **WSL** (shell mode works there). **`--launch` needs `tmux`.**
 
 Inside a Claude Code session:
 
