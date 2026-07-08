@@ -29,6 +29,14 @@ sethu --allow git     # opt a whole tool in (git/find/npm/…); safe tools like 
 
 Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=^|" height="13"> bridge, so sethu's output is easy to spot.
 
+`> git status` — you see the result yourself, for free (the model never sees it):
+
+![sethu running "> git status": the git output under a teal |^=^| header, marked exit 0, at zero tokens](assets/git_status_sethu.png)
+
+Add a second `>`: `>> git status` runs the same command but sends the output to Claude, so it can act on it (that part costs tokens):
+
+![sethu running ">> git status": the output shared with Claude, which then answers back](assets/git_status_sethu_claude.png)
+
 ---
 
 ## ⚡ Why sethu?
@@ -146,6 +154,10 @@ Config lives in `~/.claude/sethu.json`. The full `sethu` menu has a few more kno
 ---
 
 ## 🛡️ Safety
+
+When a command isn't gated, the refusal tells you *why* and hands you the ways forward:
+
+![sethu refusing "> rm foo" because rm can change files, listing options: allow the tool, open in a terminal, trust everything, or see what's gated](assets/sethu_refusal.png)
 
 - **Gated by default.** Tools that can't write files or run other programs, whatever
   the flags (`ls`, `cat`, `grep`, `jq`, …), run automatically. Anything that *can*
