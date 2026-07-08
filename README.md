@@ -268,7 +268,8 @@ sethu --allow python3
 ```
 
 `python`/`node`/`irb`/`ipython` count as interactive only when launched bare or
-with `-i`. A script path, `-c`, or `-m` means batch mode.
+with `-i`. Give them a script path, `-c`, or `-m` and they run the code straight
+through and exit, so sethu captures the output fine.
 </details>
 
 ---
