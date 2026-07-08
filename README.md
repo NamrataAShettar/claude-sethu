@@ -119,7 +119,7 @@ Config lives in `~/.claude/sethu.json`.
 
 | Mode | `cd` sticks | `export`/venv sticks | Notes |
 | --- | :---: | :---: | --- |
-| `stateless` | ❌ | ❌ | fresh `bash -c` each time |
+| `stateless` | ❌ | ❌ | fresh `sh -c` subprocess each time |
 | `cwd` *(default)* | ✅ | ❌ | working dir remembered in a temp file |
 | `shell` | ✅ | ✅ | one persistent `bash` (PTY daemon), reused |
 
@@ -148,10 +148,11 @@ Config lives in `~/.claude/sethu.json`.
   with no Claude Code "allow this?" popup, so keep the allowlist tight, like shell
   aliases. Allowing a tool that can run other programs (`git`, `sh`, `python`, …)
   permits *all* of its flags; sethu warns you when you do.
-- **Injection-hardened.** An allowed or gated command may only be followed by plain
-  arguments, not an unquoted pipe, redirect, `;`/`&&`, subshell, or `$(…)`. Allowing
-  `ls` does **not** allow `> ls; rm -rf ~`. (Those special characters *inside quotes*
-  are fine, so once `python3` is allowed, `> python3 -c "import os; print(1)"` works.)
+- **Injection-hardened.** You can't chain a second command onto an allowed or gated
+  one: no unquoted `;`, `&&`, redirect (`>`), background `&`, or `$(…)`. Allowing `ls`
+  does **not** allow `> ls; rm -rf ~`. Pipes run only when *every* tool in them is gated
+  (`> cat f | grep x` works; `> ls | rm` is refused). Characters inside quotes are
+  literal, so once `python3` is allowed, `> python3 -c "import os; print(1)"` works.
 - **Trust is the one safety knob.** `sethu --trust on` turns the gate off and runs
   anything with no guardrails at all. Off by default (= gated), warned loudly, shown as
   `⚠trust` while active.
@@ -197,6 +198,9 @@ to do instead:
 - **"timed out after 20s."**: captured commands are capped under Claude Code's ~30s hook
   budget. Raise it with `sethu --timeout`, or run long-lived commands (servers, `tail -f`)
   in a real terminal with `sethu --launch`.
+- **Nothing happens at all (or a "sethu needs python3" note at session start)**: sethu's
+  hooks run on `python3`. If it isn't on your `PATH`, sethu goes inactive (your prompts
+  still work normally). Install python3 (see Requirements), then `/reload-plugins`.
 
 Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/issues).
 
@@ -227,7 +231,7 @@ the `>` prefix.
 <details>
 <summary>Accessibility (screen readers, plain terminals)</summary>
 
-The header is colorblind-safe (Okabe-Ito) and never color-only; status, mode, and
+The header is colorblind-safe (blue for success, not green/red) and never color-only; status, mode, and
 warnings are always words, so a screen reader gets the full meaning; `NO_COLOR` drops
 color. For readers, **`sethu --plain on`** (or `SETHU_PLAIN`) swaps the `|^=^|` icon and
 `·✓✗⚠→` glyphs for a plain `sethu:` prefix + comma-separated words (e.g. `sethu: [cwd],
@@ -243,8 +247,8 @@ note points at it, so you can open it, or `sethu --launch "less <path>"` to scro
 it.
 
 Storage stays bounded: the saved file is **reused per session** (one at a time),
-sethu sweeps its own temp files older than 7 days, and the OS temp dir is purged
-on its own schedule. Persistent-shell sockets are left to the daemon.
+and sethu sweeps its own temp files (saved output, launch scripts, shell-mode
+sockets) once they're older than 7 days.
 </details>
 
 <details>
