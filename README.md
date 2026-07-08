@@ -66,7 +66,7 @@ to spot.
   [python.org](https://www.python.org/downloads/). Most Linux distros already
   include it. (If it's missing, sethu tells you at session start and stays out of
   your way, so your prompts still work normally, rather than erroring.)
-- **macOS or Linux.** Shell mode and `--launch` are Unix-only; on Windows, use
+- **macOS or Linux.** Shell mode and `--launch` are Unix-only. On Windows, use
   WSL. (The plain `>` / `cwd` / `stateless` runner is otherwise portable.)
 
 Inside a Claude Code session:
@@ -131,17 +131,17 @@ Config lives in `~/.claude/sethu.json`.
   you launched Claude in).
 - `shell` mode keeps a long-lived bash so `cd`, env vars, `source`, and venvs carry
   across commands. It idles out after 30 min, and `sethu --restart` clears it on demand.
-- `shell` mode runs a clean `bash --norc` by default; turn on `sethu --rc on` to source
+- `shell` mode runs a clean `bash --norc` by default. Turn on `sethu --rc on` to source
   your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
 
 ---
 
 ## 🛡️ Safety
 
-- **Gated by default.** Only tools that can't write files or run other programs,
-  whatever the flags (`ls`, `cat`, `grep`, `jq`, …), run automatically; anything that
-  can (`git`, `find`, `npm`, …) waits for `sethu --allow`. sethu judges the whole tool,
-  not individual flags: it's allowed entirely or not at all.
+- **Gated by default.** Tools that can't write files or run other programs, whatever
+  the flags (`ls`, `cat`, `grep`, `jq`, …), run automatically. Anything that *can*
+  (`git`, `find`, `npm`, …) waits for `sethu --allow`. sethu judges the whole tool, not
+  individual flags, so a tool is allowed entirely or not at all.
 - **A guardrail, not a sandbox.** You can always bypass it: your own terminal, or
   widening the gate with `--allow` or `--trust`. (In **shell mode**, an alias or `PATH`
   you set sticks, so a later command runs whatever you redefined it to, exactly like a
@@ -149,7 +149,7 @@ Config lives in `~/.claude/sethu.json`.
 - **Runs in your shell, no per-command prompts.** sethu executes commands directly,
   with no Claude Code "allow this?" popup, so keep the allowlist tight, like shell
   aliases. Allowing a tool that can run other programs (`git`, `sh`, `python`, …)
-  permits *all* of its flags; sethu warns you when you do.
+  permits *all* of its flags, and sethu warns you when you do.
 - **Injection-hardened.** You can't chain a second command onto an allowed or gated
   one: no unquoted `;`, `&&`, redirect (`>`), background `&`, or `$(…)`. Allowing `ls`
   does **not** allow `> ls; rm -rf ~`. Pipes run only when *every* tool in them is gated
@@ -174,7 +174,7 @@ to do instead:
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
 | **Different modes in two sessions at once** | Settings (mode, allowlist, trust) live in one shared config, so `sethu --mode` / `--allow` apply to **all** your Claude sessions. (Each session's working dir and `shell` bash stay separate.) | Set the mode you need for now; you can't run one session in `shell` and another in `cwd` simultaneously. |
 | **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
-| **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …); that's git's behavior, same as your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
+| **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …), which is git's own behavior, the same as in your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for
@@ -186,13 +186,13 @@ to do instead:
 
 - **"UserPromptSubmit operation blocked by hook:" appears before my output**: that's
   normal, and it means it worked. Claude Code prints that wrapper around any prompt a
-  hook handles locally; it's how sethu keeps your command out of the model. The
+  hook handles locally. That's how sethu keeps your command out of the model. The
   `|^=^| [mode] ✓ exit 0` line below it is your actual result.
 - **I typed `> cmd` but nothing ran (or Claude answered it instead)**: you typed it
   while Claude was still generating. sethu only fires on a prompt that *starts* a turn,
   so a `>` typed mid-response is read by the model (and costs tokens), not run by sethu.
   Send `> cmd` when Claude is idle.
-- **"`X` isn't in the gated set."**: sethu is gated by default; the message tells you
+- **"`X` isn't in the gated set."**: sethu is gated by default. The message tells you
   why (e.g. `git`/`npm` can write or run other programs). To permit it, `sethu --allow X`
   (the whole tool). If it's interactive (`vim`, a bare REPL), use `sethu --launch "X"`
   instead (allowlisting can't make those run). To drop the guardrails entirely, there's
@@ -233,9 +233,10 @@ the `>` prefix.
 <details>
 <summary>Accessibility (screen readers, plain terminals)</summary>
 
-The header is colorblind-safe (blue for success, not green/red) and never color-only; status, mode, and
-warnings are always words, so a screen reader gets the full meaning; `NO_COLOR` drops
-color. For readers, **`sethu --plain on`** (or `SETHU_PLAIN`) swaps the `|^=^|` icon and
+The header is colorblind-safe (blue for success, not green/red) and never color-only.
+Status, mode, and warnings are always words, so a screen reader gets the full meaning,
+and `NO_COLOR` drops color entirely. For readers, **`sethu --plain on`** (or
+`SETHU_PLAIN`) swaps the `|^=^|` icon and
 `·✓✗⚠→` glyphs for a plain `sethu:` prefix + comma-separated words (e.g. `sethu: [cwd],
 exit 0, $ git status`), also a fallback for terminals without good Unicode.
 </details>
