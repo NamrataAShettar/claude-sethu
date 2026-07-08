@@ -14,7 +14,7 @@ Every terminal command you ask Claude to run dumps its output into the context w
 **costs tokens**, **clutters the conversation**, and fills your context faster (so
 auto-compaction hits sooner). Alt-tabbing to a real terminal breaks your flow.
 
-### <img src="assets/sethu-icon.svg" alt="|^=^|" height="18"> What sethu does
+### <img src="assets/sethu-icon.svg" alt="|^=^|" height="18"> What does sethu do?
 
 Type a command with a `>` prefix as an ordinary message. A `UserPromptSubmit` hook
 runs it locally and blocks the prompt, so **the model never sees it and you spend
@@ -31,7 +31,7 @@ Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=
 
 ---
 
-## ⚡ Why sethu
+## ⚡ Why sethu?
 
 - **💸 Save tokens.** Glance at `> git status`, `> git diff`, `> ls`, or
   `> cat config.json` as often as you like, all for free. The output stays out of
