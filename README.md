@@ -162,7 +162,7 @@ Config lives in `~/.claude/sethu.json`.
 
 ---
 
-## 🚧 When sethu *won't* work (the honest limits)
+## 🚧 When sethu *won't* work? (the honest limits)
 
 sethu is a hook, and hooks have boundaries. Here's where it can't help, and what
 to do instead:
