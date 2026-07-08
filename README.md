@@ -49,7 +49,7 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
   tools (`ls`, `cat`, `grep`, `jq`, …) just works, while everything else is refused
   until you `--allow` that tool (or `--trust on` for everything).
 - **🪶 No package installs.** Pure Python standard library: no `pip`, no npm, no
-  third-party packages to manage. (It just needs `python3`, see the Install section.)
+  third-party packages to manage. (It just needs `python3`, see [Install](#-install).)
 
 > **sethu vs. `!` bang mode:** `!` always feeds output to Claude, so it always
 > costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
@@ -230,7 +230,7 @@ to do instead:
   in a real terminal with `sethu --launch`.
 - **Nothing happens at all (or a "sethu needs python3" note at session start)**: sethu's
   hooks run on `python3`. If it isn't on your `PATH`, sethu goes inactive (your prompts
-  still work normally). Install python3 (see the Install section), then `/reload-plugins`.
+  still work normally). Install python3 (see [Install](#-install)), then `/reload-plugins`.
 
 Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/issues).
 
