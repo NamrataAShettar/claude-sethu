@@ -86,6 +86,14 @@ with one, either don't make it or update this doc deliberately.
   never drift or go stale (they once still said "read-only by default" long after the model
   became "gated"). When the pitch or the model changes, update all four in the same change,
   match the README's framing, and keep the wording plain (no "read-only"/"execs" jargon).
+- **Screenshots are docs too, keep them fresh.** `README.md` embeds `assets/*.png` captures
+  of real sethu output: the `|^=^| · [mode] · status · $ cmd` header, the `>>` "shared … used
+  tokens" note, and the refusal fix-menu. A change that alters any of those (the `_header`
+  format, the palette, the refusal bullets, the `>>` confirmation, `--plain`/`--color` output)
+  makes a screenshot stale and misleading. Flag it in the same change and re-capture. A
+  screenshot can only be taken by a **human from a live Claude Code session**, so call it out
+  explicitly rather than assuming it's covered, and keep the set consistent (same terminal
+  width / zoom / theme so fonts render uniformly).
 - **Validate values, not just types.** A hand-edited config must never crash or
   misbehave: coerce list entries to strings, fall back an invalid mode, reject an
   empty prefix, fall back malformed numbers.
@@ -204,6 +212,7 @@ with one, either don't make it or update this doc deliberately.
 - [ ] **UX** — opens with the `|^=^|` icon (so sethu is instantly recognizable), colorblind-safe & no new hue, truthful, actionable, plain language, no em-dashes.
 - [ ] **Correctness** — validates input, fails safe, doesn't rely on stale state.
 - [ ] **Use-cases** — every `docs/use-cases.md` example still behaves as documented (gated ones run, `--allow`/`--launch`/`--mode` ones work); doc updated in this change if permitted behavior changed.
+- [ ] **Screenshots** — if this changes the header / refusal menu / `>>` output / colors, the README `assets/*.png` are re-captured (human, live session) or flagged as needing it.
 - [ ] **Security** — does it widen what runs? flags (not just names) audited? fails closed? trust still opt-in?
 - [ ] **Performance** — no new work on the every-prompt path; fast path still skips `_engine`.
 - [ ] **Storage** — output stays bounded; any new temp artifact is swept.
