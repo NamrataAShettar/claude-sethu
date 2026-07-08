@@ -68,7 +68,7 @@ Inside a Claude Code session:
 /reload-plugins
 ```
 
-That's it. Gated tools like `> ls` / `> grep` work immediately. For anything else
+That's it. Gated tools like `> ls` / `> grep` work immediately (`sethu --gated-list` shows the whole set). For anything else
 (git, find, npm, …), allow the tool once: `sethu --allow git`. (Manage sethu right in the
 prompt box: type bare `sethu` for the menu, no terminal setup needed.)
 
