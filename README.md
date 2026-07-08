@@ -68,13 +68,14 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
 **Requirements:**
 
 - [Claude Code](https://claude.com/claude-code).
-- **`python3` (3.9 or newer)** on your `PATH`. sethu's hooks run it, so it's
-  required. Check with `python3 --version`. If it's missing (recent macOS doesn't ship it by default),
-  install via [Homebrew](https://brew.sh) (`brew install python`), the Xcode
-  Command Line Tools (`xcode-select --install`), or
-  [python.org](https://www.python.org/downloads/). Most Linux distros already
-  include it. (If it's missing, sethu tells you at session start and stays out of
-  your way, so your prompts still work normally, rather than erroring.)
+- **`python3` (3.9 or newer)** on your `PATH`. sethu's hooks run it. Check with
+  `python3 --version`.
+  - Most Linux distros already include it.
+  - macOS often doesn't ship it. Install via [Homebrew](https://brew.sh)
+    (`brew install python`), the Xcode Command Line Tools (`xcode-select --install`), or
+    [python.org](https://www.python.org/downloads/).
+  - If it's missing, sethu tells you at session start and goes quiet, so your prompts
+    still work normally.
 - **Platform.** The plain `>` / `cwd` / `stateless` runner works everywhere. Shell mode and
   `--launch` are the only OS-sensitive parts:
   - **macOS:** both work.
@@ -97,10 +98,11 @@ That's it. Gated tools like `> ls` / `> grep` work immediately. For anything els
 No terminal setup needed.)
 
 **Keeping sethu up to date:** sethu installs from its own marketplace, which (like all
-non-official marketplaces) doesn't auto-update by default. Either turn on auto-update once
-(recommended) via `/plugin` → **Marketplaces** → **sethu** → **Enable auto-update** (Claude
-Code then updates sethu at session start), or update by hand anytime with `/plugin
-marketplace update sethu` then `/plugin update sethu`.
+non-official marketplaces) doesn't auto-update by default. Two ways to stay current:
+
+- **Auto (recommended):** `/plugin` → **Marketplaces** → **sethu** → **Enable auto-update**.
+  Claude Code then updates sethu at session start.
+- **By hand, anytime:** `/plugin marketplace update sethu`, then `/plugin update sethu`.
 
 ---
 
@@ -199,10 +201,10 @@ to do instead:
 | **Interactive programs** (`vim`, `top`, `ssh`, a bare REPL) | The runner has no terminal, so they'd hang. | `sethu --launch "vim"` opens a real pane (macOS or tmux; on plain Linux/WSL, run it in your own terminal). |
 | **Commands that prompt for input** (`npm install` conflicts, `apt install` "[Y/n]", `gh auth login`) | Even shell mode can't *type back* at a prompt. | Use non-interactive flags (`-y`, `--yes`, `DEBIAN_FRONTEND=noninteractive`) or `--launch`. |
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
-| **Different modes in two sessions at once** | Settings (mode, allowlist, trust) live in one shared config, so `sethu --mode` / `--allow` apply to **all** your Claude sessions. (Each session's working dir and `shell` bash stay separate.) | Set the mode you need for now; you can't run one session in `shell` and another in `cwd` simultaneously. |
+| **Different modes in two sessions at once** | Settings (mode, allowlist, trust) live in one shared config, so `sethu --mode` and `--allow` apply to **all** your sessions. (Working dir and the `shell` bash stay per-session.) | Set the mode you need for now; you can't run one session in `shell` and another in `cwd` simultaneously. |
 | **Windows (native)** | Shell mode needs Unix sockets/PTYs; `--launch` needs macOS or tmux. | Use WSL (with `tmux` for `--launch`). |
 | **`--launch` on plain Linux / WSL (no tmux)** | sethu can't open a terminal window there yet (no native Linux-terminal support), so `--launch` won't work. | Start `tmux` first (then `--launch` splits a pane), or just run the command in your own terminal. |
-| **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …), which is git's own behavior, the same as in your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
+| **`--allow`-ed git in an untrusted repo** | After `--allow git`, commands like `> git status` can run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …). That's git's normal behavior, same as in your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
 > sethu's allowlist, mode, or cwd. It's an escape hatch out of sethu for
@@ -212,19 +214,19 @@ to do instead:
 
 ## 🛟 Troubleshooting
 
-- **"UserPromptSubmit operation blocked by hook:" appears before my output**: that's
-  normal, and it means it worked. Claude Code prints that wrapper around any prompt a
-  hook handles locally. That's how sethu keeps your command out of the model. The
-  `|^=^| [mode] ✓ exit 0` line below it is your actual result.
+- **"UserPromptSubmit operation blocked by hook:" appears before my output**: Normal, and
+  it means it worked. Claude Code wraps that around any prompt a hook handles locally, which
+  is how sethu keeps your command out of the model. Your real result is the
+  `|^=^| [mode] ✓ exit 0` line below it.
 - **I typed `> cmd` but nothing ran (or Claude answered it instead)**: you typed it
   while Claude was still generating. sethu only fires on a prompt that *starts* a turn,
   so a `>` typed mid-response is read by the model (and costs tokens), not run by sethu.
   Send `> cmd` when Claude is idle.
-- **"`X` isn't in the gated set."**: sethu is gated by default. The message tells you
-  why (e.g. `git`/`npm` can write or run other programs). To permit it, `sethu --allow X`
+- **"`X` isn't in the gated set."**: sethu is gated by default, and the message says why
+  (e.g. `git`/`npm` can write or run other programs). Permit it with `sethu --allow X`
   (the whole tool). If it's interactive (`vim`, a bare REPL), use `sethu --launch "X"`
-  instead (allowlisting can't make those run). To drop the guardrails entirely, there's
-  `sethu --trust on`, genuinely risky, so prefer allowlisting the specific tools you want.
+  instead, since allowlisting can't make those run. `sethu --trust on` drops all guardrails,
+  so prefer allowlisting the specific tools you need.
 - **"timed out after 20s."**: captured commands are capped under Claude Code's ~30s hook
   budget. Raise it with `sethu --timeout`, or run long-lived commands (servers, `tail -f`)
   in a real terminal with `sethu --launch`.
@@ -248,11 +250,10 @@ your others (hooks run **in parallel**, with no ordering dependence):
 - **`> cmd` / `sethu …`** blocks that one prompt (its purpose). Other hooks still
   run their side effects, but the model doesn't (as intended).
 
-The only overlap to know about is another `UserPromptSubmit` hook that *also* acts
-on `>`-prefixed prompts. If two hooks both block the same prompt it stays blocked
-(fine), but Claude Code doesn't document how two block *reasons* are combined, so
-the shown result may merge them. That's rare in practice, since sethu only claims
-the `>` prefix.
+One overlap to know about: another `UserPromptSubmit` hook that *also* acts on
+`>`-prefixed prompts. If both block the same prompt, it stays blocked (fine), but Claude
+Code doesn't document how two block *reasons* combine, so the shown result may merge them.
+Rare in practice, since sethu only claims the `>` prefix.
 
 ---
 
