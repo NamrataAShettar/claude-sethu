@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60" viewBox="0 0 200 60" role="img" aria-label="sethu, the |^=^| bridge icon">
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="30" viewBox="0 0 108 30" role="img" aria-label="sethu, the |^=^| bridge icon">
   <title>sethu</title>
   <!-- The literal |^=^| icon (towers with cables dipping to the deck) in sethu's
        terminal teal (xterm-256 color 37, the icon color from _engine.py). Transparent
-       background so it reads on GitHub light and dark themes. -->
-  <text x="100" y="42" text-anchor="middle"
+       background so it reads on GitHub light and dark themes. Tightly cropped and
+       vertically centred (dominant-baseline) so it aligns cleanly inline with text. -->
+  <text x="54" y="15" text-anchor="middle" dominant-baseline="central"
         font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', 'Courier New', monospace"
-        font-size="40" font-weight="700" letter-spacing="3" fill="#00afaf">|^=^|</text>
+        font-size="30" font-weight="700" letter-spacing="2" fill="#00afaf">|^=^|</text>
 </svg>
