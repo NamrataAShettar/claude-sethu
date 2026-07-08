@@ -63,6 +63,13 @@ DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
 # GATED tool set + your --allow'd tools run); `trust: True` ungates everything. An
 # old config's stale `readonly` key is simply ignored by load_config (not in DEFAULTS).
 MODES = ("stateless", "cwd", "shell")
+# Leading characters Claude Code's input box reserves for its own modes — shell/bang mode
+# (`!`), slash commands (`/`), and file/MCP mentions (`@`) — documented at
+# code.claude.com/docs/en/interactive-mode.md. A prompt starting with one is handled by
+# Claude Code's UI and never reaches sethu's UserPromptSubmit hook, so it can't be a sethu
+# prefix. There's no API to query this set, so it's hardcoded: update here if Claude Code
+# changes or adds one (last checked 2026-07-08).
+_RESERVED_PREFIXES = {"!": "shell/bang mode", "/": "slash commands", "@": "file mentions"}
 
 
 def cmd_timeout(cfg=None):
@@ -1454,11 +1461,11 @@ def _apply_cli_mutations(a, cfg):
         print(f"✔ mode: {a.mode}{note}")
         changed = True
     if a.prefix:
-        if a.prefix[0] in ("!", "/"):
-            special = "bang (bash) mode" if a.prefix[0] == "!" else "slash commands"
-            print(f"can't set the prefix to {a.prefix!r}: Claude Code intercepts a leading "
-                  f"{a.prefix[0]!r} for {special} before sethu's hook sees it, so it would "
-                  f"never trigger. Pick another prefix (the default is '>').")
+        reserved = _RESERVED_PREFIXES.get(a.prefix[0])
+        if reserved:
+            print(f"can't set the prefix to {a.prefix!r}: Claude Code reserves a leading "
+                  f"{a.prefix[0]!r} for {reserved} and handles it in the UI before sethu's "
+                  f"hook sees it, so it would never trigger. Pick another prefix (default '>').")
             noop = True
         else:
             cfg["prefix"] = a.prefix

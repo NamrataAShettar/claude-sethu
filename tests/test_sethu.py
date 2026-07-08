@@ -380,11 +380,11 @@ class TestManagementCLI(Base):
                   "Gated by default"]:
             self.assertIn(t, out, t)
 
-    def test_prefix_bang_and_slash_refused(self):
-        # `!` (bang mode) and `/` (slash commands) are intercepted by Claude Code before
-        # sethu's UserPromptSubmit hook, so a prefix starting with either would never
-        # trigger. Refuse it instead of silently storing a dead prefix.
-        for p in ("!", "/", "!run", "/x"):
+    def test_prefix_reserved_chars_refused(self):
+        # `!` (shell/bang mode), `/` (slash commands), and `@` (file mentions) are reserved
+        # by Claude Code's UI and never reach sethu's hook, so a prefix starting with any of
+        # them would never trigger. Refuse instead of silently storing a dead prefix.
+        for p in ("!", "/", "@", "!run", "/x", "@f"):
             out = self._out(["--prefix", p])
             self.assertIn("never trigger", out, p)
             self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
