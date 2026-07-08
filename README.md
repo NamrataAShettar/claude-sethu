@@ -1,4 +1,6 @@
-# `|^=^|` sethu: a bridge between Claude Code's prompt box and your shell
+<p align="center"><img src="assets/sethu-icon.svg" alt="|^=^|" height="44"></p>
+
+# sethu: a bridge between Claude Code's prompt box and your shell
 
 Run terminal commands **right in the Claude Code prompt box**, see the output
 yourself for **free** (it never touches the model), and share it with Claude only

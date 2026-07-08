@@ -154,14 +154,27 @@ with one, either don't make it or update this doc deliberately.
   is already sub-microsecond. Don't add per-prompt work for a micro-optimization.
 - **Verify no degradation with the invariant test, not ms thresholds.** The fast path
   skipping `_engine` is pinned by `test_fast_path_skips_engine_import` (deterministic).
-  Wall-clock is env-dependent (interpreter startup dominates and varies by machine),
-  so it's a **reference, not a CI gate**. Reference baseline (2026-07-06, one machine):
-  normal-prompt overhead ≈ 32 ms of which **sethu's own code is < 1 ms**; `> cmd`
-  +4 ms (bash spawn); warm shell ≈ 38 ms; `_maybe_sethu` ≈ 11 µs; `is_gated`/`_matches`
-  ≈ 5–11 µs (the quote-aware `shlex` tokenize, up from the old naive split, still ~400×
-  under the +4 ms bash spawn and only on the `> cmd` path, never the every-prompt fast
-  path). Re-measure with `python3 -X importtime hooks/sethu_hook.py` and a `timeit` loop
-  over `process()` when touching a hot path.
+  Wall-clock is env-dependent (interpreter startup dominates and varies by machine), so
+  these are a **same-machine reference, not a CI gate or a leaderboard**. When you touch a
+  hot path, re-measure (`python3 -X importtime hooks/sethu_hook.py` + a `timeit` loop over
+  `process()`) and update the table: shift `Current` into `Last`, put the new numbers in
+  `Current`, and only lower `Best yet` if it's a real, correct improvement.
+
+  | Metric | Last (2026-07-03) | Current (2026-07-06) | Best yet |
+  | --- | --- | --- | --- |
+  | normal-prompt overhead | ≈ 32 ms | ≈ 32 ms † | ≈ 32 ms |
+  | — of which sethu's own code | < 1 ms | < 1 ms † | < 1 ms |
+  | `> cmd` extra (bash spawn) | +4 ms | +4 ms † | +4 ms |
+  | warm shell (shell mode) | ≈ 38 ms | ≈ 38 ms † | ≈ 38 ms |
+  | `_maybe_sethu` (prefix gate) | ≈ 11 µs | ≈ 11 µs † | ≈ 11 µs |
+  | `is_gated` / `_matches` | sub-µs ‡ | 5–11 µs | 5–11 µs ‡ |
+
+  † Carried from 2026-07-03; on 2026-07-06 only `is_gated`/`_matches` was re-measured
+  (the quote-aware `shlex` change). Re-measure the rest next time you touch the hot path.
+  ‡ The old sub-µs was the pre-`shlex` naive `|` split, which had the quoted-pipe bug
+  (fixed in #15). The 5–11 µs version is correct, still ~400× under the +4 ms bash spawn,
+  and runs only on the `> cmd` path (never the every-prompt fast path) — so "faster" here
+  would mean reverting a correctness fix. Correctness won; it's not a target to chase.
 
 ## Storage
 
