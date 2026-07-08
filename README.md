@@ -51,8 +51,8 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
 - **🪶 No package installs.** Pure Python standard library: no `pip`, no npm, no
   third-party packages to manage. (It just needs `python3`, see [Install](#-install).)
 
-> **sethu vs. `!` bang mode:** `!` always feeds output to Claude, so it always
-> costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
+> **sethu vs. `!` bang mode:** `!` is Claude Code's built-in shell shortcut, and it
+> always feeds output to Claude, so it always costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
 > persistent shell and allowlist guardrails. If you always want Claude to act on
 > the output, `!` is fine. If you want to look at things for free, use `>`.
 
@@ -115,8 +115,7 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `>> cmd` | run it and **send output to Claude** (costs tokens) |
 | `sethu --allow "tool"` | permit a whole tool, any flags (`git`, `find`, `npm`, …); gated ones already run |
 | `sethu --unallow "tool"` | remove a tool from the allowlist |
-| `sethu --launch "cmd"` | open `cmd` in a real terminal now, **and** register it so future `> cmd` opens there too (for `vim`, `top`, `ssh`, …) |
-| `sethu --unlaunch "cmd"` | remove `cmd` from the launch list (go back to running it captured) |
+| `sethu --launch "cmd"` | open `cmd` in a real terminal now, one-shot (for `vim`, `top`, `ssh`, a REPL, `tail -f`, …) |
 | `sethu --gated-list` | tools that run without asking (built-in + ones you allowed) |
 | `sethu --trust on` | ⚠ run **anything**, gate off (no guardrails) |
 | `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see [below](#-statefulness-modes)) |

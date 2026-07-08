@@ -56,12 +56,14 @@ MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
 # rather than just bumping the number.
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024   # 8 MiB
 
-DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
+DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [],
             "trust": False, "rc": False, "color": True, "plain": False,
             "maxLines": MAX_LINES, "timeout": CMD_TIMEOUT}
-# Note: there is no `readonly` key any more. sethu is "gated" by default (only the
-# GATED tool set + your --allow'd tools run); `trust: True` ungates everything. An
-# old config's stale `readonly` key is simply ignored by load_config (not in DEFAULTS).
+# Note: no `readonly` or `launch` key. sethu is "gated" by default (only the GATED tool
+# set + your --allow'd tools run); `trust: True` ungates everything. `--launch` is now a
+# one-shot open (it runs the command in a real terminal now and stores nothing). An old
+# config's stale `readonly`/`launch` key is simply ignored by load_config (not in
+# DEFAULTS) and dropped on the next save.
 MODES = ("stateless", "cwd", "shell")
 
 
@@ -388,7 +390,6 @@ def load_config():
     # removable and can actually match a command); empties are dropped. Mode must be
     # a real mode, and the prefix can't be empty (which would match every prompt).
     cfg["allow"] = [c for c in (" ".join(str(x).split()) for x in cfg["allow"]) if c]
-    cfg["launch"] = [c for c in (" ".join(str(x).split()) for x in cfg["launch"]) if c]
     if cfg["mode"] not in MODES:
         cfg["mode"] = DEFAULTS["mode"]
     if not cfg["prefix"]:
@@ -466,7 +467,7 @@ def save_config(cfg):
                   json.dumps({k: cfg[k] for k in DEFAULTS}, indent=2) + "\n")
 
 
-# ── allow / launch matching ───────────────────────────────────────────────────
+# ── allow matching ────────────────────────────────────────────────────────────
 # An allowlisted command may be followed by plain arguments only — NOT a pipe,
 # redirect, or chain to something unallowed. Without this, allowing `ls` would
 # also allow `ls | rm -rf x` via prefix matching. The check is quote-aware, so a
@@ -1082,7 +1083,7 @@ HELP = ("type `> <command>` to run it (free — gated tools like ls/cat/grep run
 def _why_refused(cmd, cfg):
     """The specific REASON a command isn't auto-run, phrased to read as a continuation
     of the header's `$ cmd` (lowercase start). Reason only — the actions (`--allow` /
-    `--launch` / `--trust` / `--gated-list`) are the refusal's bullets, so we don't
+    `--launch` / `--trust`) are the refusal's bullets, so we don't
     repeat them here. Empty → the caller's generic 'isn't in the gated set' line covers
     it (e.g. a pipe whose first tool is gated but a later segment isn't)."""
     if cfg.get("trust"):
@@ -1144,12 +1145,6 @@ def process(prompt, data):
 
     sid = data.get("session_id")
     base = get_cwd(sid, data.get("cwd"))
-
-    if _matches(cmd, cfg["launch"]):
-        status = launch_in_terminal(cmd) or "couldn't open a terminal, run it in your own terminal."
-        if plain:
-            status = status.replace("↗ ", "")   # no glyphs in plain mode
-        return {"block": _reply(mode, trust_on, cmd, status, on, plain)}
 
     # cd is exempt from the allowlist (it runs nothing); behavior depends on mode.
     # Only a *bare* cd is exempt — a chained `cd x; …` is not, so it can't smuggle
@@ -1223,7 +1218,6 @@ def process(prompt, data):
         bullets += [
             f'  {b} Open in a terminal:  sethu --launch "{cmd}"',
             f"  {b} Run everything:      sethu --trust on   (no guardrails)",
-            f"  {b} See what's gated:    sethu --gated-list",
         ]
         return {"block": _reply(mode, trust_on, cmd, reason + "\n" + "\n".join(bullets),
                 on, plain)}
@@ -1305,7 +1299,7 @@ def help_text():
 
 Let a command run (gated tools like ls / cat / grep / jq run already):
   sethu --allow "tool"     permit a whole tool, any flags (e.g. git, find); undo: --unallow
-  sethu --launch "cmd"     interactive (vim/top/ssh) or long-running: opens a terminal (undo: --unlaunch)
+  sethu --launch "cmd"     open an interactive (vim/top/ssh) or long-running command in a terminal (one-shot)
   sethu --gated-list       tools that run without asking (built-in + ones you allowed)
   sethu --trust on         run ANY `>` command, gate off (no guardrails)
 
@@ -1326,7 +1320,7 @@ Gated by default: a curated set of safe tools runs free; everything else needs
 Config: {config_path()}   now: mode={cfg['mode']}, trust={'on' if cfg.get('trust') else 'off'}, {len(cfg['allow'])} allowed"""
 
 
-SUBCOMMANDS = {"mode", "allow", "unallow", "launch", "unlaunch",
+SUBCOMMANDS = {"mode", "allow", "unallow", "launch",
                "trust", "rc", "color", "plain", "maxlines", "timeout", "prefix",
                "restart", "runner", "show", "help"}
 
@@ -1339,7 +1333,7 @@ def normalize_argv(argv):
         sub, rest = argv[0], argv[1:]
         if sub == "help":
             return []
-        if sub in ("allow", "unallow", "launch", "unlaunch") and rest:
+        if sub in ("allow", "unallow", "launch") and rest:
             return ["--" + sub, " ".join(rest)]
         return ["--" + sub] + rest
     return argv
@@ -1428,15 +1422,10 @@ def _apply_cli_mutations(a, cfg):
         if not val:
             print("nothing to launch (the command was empty)."); noop = True
         else:
-            # "launch" is a verb — open it now, not just register it. From here on
-            # `> <val>` opens a terminal too (that's what the launch list is for). The
-            # list write happens under the lock; the terminal open is deferred to main.
-            if val not in cfg["launch"]:
-                cfg["launch"].append(val)
-            changed = True
+            # "launch" is a verb: open it now in a real terminal. One-shot — nothing is
+            # stored (the terminal open is deferred to main, outside the config lock).
             launch_val = val
-    for field, key, name in (("unallow", "allow", "allowlist"),
-                             ("unlaunch", "launch", "launch list")):
+    for field, key, name in (("unallow", "allow", "allowlist"),):
         val = getattr(a, field)
         if val is not None:
             val = " ".join(val.split())
@@ -1499,22 +1488,16 @@ def _apply_cli_mutations(a, cfg):
 
 
 def _announce_launch(val):
-    """Open `val` in a terminal and print the result. Called OUTSIDE the config lock so
-    a terminal launch that blocks (e.g. a macOS automation-permission prompt) can't hold
-    up other concurrent `sethu --…` writers."""
+    """Open `val` in a terminal once and print the result. Called OUTSIDE the config lock
+    so a blocking terminal open (e.g. a macOS automation-permission prompt) can't hold up
+    other concurrent `sethu --…` writers. One-shot: nothing is stored."""
     status = launch_in_terminal(val)
-    note = ("  Note: the launched terminal is a plain shell: it does NOT "
-            "share sethu's allowlist / mode / cwd.")
     if status:
-        print(f"✔ launched {val!r} ({status}) AND added it to the launch list. "
-              f"That's persistent, so from now on `> {val}` opens a terminal "
-              f"instead of running captured. Undo with `sethu --unlaunch "
-              f"{val!r}`.\n{note}")
+        print(f"✔ opened {val!r} in a terminal ({status}). Note: it's a plain shell, so "
+              f"it does NOT share sethu's allowlist / mode / cwd.")
     else:
-        print(f"✔ added {val!r} to the launch list (persistent), so from now on "
-              f"`> {val}` opens a terminal. Couldn't open one right now (no tmux "
-              f"pane; auto-open is macOS/tmux only), so run `{val}` in your "
-              f"terminal. Undo with `sethu --unlaunch {val!r}`.\n{note}")
+        print(f"couldn't open a terminal for {val!r} right now (auto-open works on macOS "
+              f"or inside tmux). Run it in your own terminal instead.")
 
 
 def main(argv=None):
@@ -1529,8 +1512,7 @@ def main(argv=None):
     )
     p.add_argument("--allow", metavar="CMD", help="allow a command for the runner")
     p.add_argument("--unallow", metavar="CMD", help="remove a command from the allowlist")
-    p.add_argument("--launch", metavar="CMD", help="add a command to open in a terminal")
-    p.add_argument("--unlaunch", metavar="CMD", help="remove a command from the launch list")
+    p.add_argument("--launch", metavar="CMD", help="open a command in a terminal (one-shot)")
     p.add_argument("--mode", choices=MODES, help="set statefulness mode")
     p.add_argument("--prefix", help="set the trigger prefix (default '>')")
     p.add_argument("--gated-list", action="store_true", dest="gated_list",
@@ -1573,6 +1555,7 @@ def main(argv=None):
             save_config(cfg)
     if launch_val is not None:
         _announce_launch(launch_val)   # open the terminal AFTER releasing the lock
+        return
     if changed:
         return
     if noop:
@@ -1594,7 +1577,6 @@ def _print_config(cfg):
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (default 40; truncate long output, full saved to a file)")
     print(f"  timeout:  {cmd_timeout(cfg)}s   (default 20s; max seconds a command may run)")
     print(f"  allow:    {cfg['allow']}   (gated tools + these run; `--gated-list` to see all)")
-    print(f"  launch:   {cfg['launch']}")
 
 
 if __name__ == "__main__":

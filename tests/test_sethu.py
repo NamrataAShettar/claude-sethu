@@ -17,7 +17,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --allow                                TestConfig, TestSafety,                [x]
                                          TestRefusalMessages
   --unallow                              TestConfig                             [x]
-  --launch / --unlaunch                  TestLaunch, TestConfig                 [x]
+  --launch (one-shot open)               TestLaunch, TestConfig                 [x]
   truthful add/remove + empty/multispace TestManagementCLI                     [x]
   --mode stateless/cwd/shell             TestModeSwitching, TestCwdMode,        [x]
                                          TestShellMode
@@ -92,7 +92,7 @@ class Base(unittest.TestCase):
         os.environ.pop("SETHU_CONFIG", None)
 
     def write(self, **kw):
-        c = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [], "trust": False}
+        c = {"prefix": ">", "mode": "cwd", "allow": [], "trust": False}
         c.update(kw)
         with open(self.cfg, "w") as f:
             json.dump(c, f)
@@ -289,12 +289,12 @@ class TestInteractiveFn(unittest.TestCase):
 class TestSafety(Base):
     def test_not_allowed_refused(self):
         r = self.proc("> rm -rf /tmp/x")
-        self.assertIn("gated", r["block"])
+        self.assertIn("no guardrails", r["block"])
 
     def test_gated_blocks_dangerous(self):
         self.write()
         for c in ["ls; rm -rf ~", "echo x > /tmp/f", "cat README | sh", "git push"]:
-            self.assertIn("gated", self.proc("> " + c)["block"], c)
+            self.assertIn("no guardrails", self.proc("> " + c)["block"], c)
 
     def test_interactive_allowlisted_is_refused(self):
         self.write(allow=["vi"])
@@ -311,21 +311,21 @@ class TestSafety(Base):
     def test_chained_cd_refused_not_exempt(self):
         # H4: a chained cd must hit the normal gate (refused), not the cd exemption.
         self.write()
-        self.assertIn("gated", self.proc("> cd /tmp; rm -rf ~")["block"])
+        self.assertIn("no guardrails", self.proc("> cd /tmp; rm -rf ~")["block"])
 
     def test_allowlist_no_pipe_injection(self):
         # Allowing `ls` must NOT permit `ls | rm -rf x` (the reported bug).
         self.write(allow=["ls"])
-        self.assertIn("gated", self.proc("> ls | grep x | rm -rf x")["block"])
-        self.assertIn("gated", self.proc("> ls; rm -rf x")["block"])
-        self.assertIn("gated", self.proc("> ls && rm -rf x")["block"])
-        self.assertIn("gated", self.proc("> ls $(rm)")["block"])
+        self.assertIn("no guardrails", self.proc("> ls | grep x | rm -rf x")["block"])
+        self.assertIn("no guardrails", self.proc("> ls; rm -rf x")["block"])
+        self.assertIn("no guardrails", self.proc("> ls && rm -rf x")["block"])
+        self.assertIn("no guardrails", self.proc("> ls $(rm)")["block"])
         # but plain args are still fine
-        self.assertNotIn("gated", self.proc("> ls -la")["block"])
+        self.assertNotIn("no guardrails", self.proc("> ls -la")["block"])
 
     def test_allowlist_no_newline_injection(self):
         self.write(allow=["ls"])
-        self.assertIn("gated", self.proc("> ls\nrm -rf x")["block"])
+        self.assertIn("no guardrails", self.proc("> ls\nrm -rf x")["block"])
 
     def test_quoted_metachars_are_allowed(self):
         # A `;`/`|` INSIDE quotes is argument text, not a command chain, so an
@@ -334,7 +334,7 @@ class TestSafety(Base):
         for c in ['python3 -c "import os; print(os.getpid())"',
                   "python3 -c 'a; b; c'",
                   'echo "a|b;c"']:
-            self.assertNotIn("gated", self.proc("> " + c)["block"], c)
+            self.assertNotIn("no guardrails", self.proc("> " + c)["block"], c)
 
     def test_unquoted_ops_still_refused_with_interpreter(self):
         # But a real unquoted chain after the interpreter is still refused.
@@ -343,24 +343,24 @@ class TestSafety(Base):
                   "python3 -c \"print(1)\" | sh",
                   'python3 script.py > /etc/passwd',
                   'python3 -c "print(1)" && rm x']:
-            self.assertIn("gated", self.proc("> " + c)["block"], c)
+            self.assertIn("no guardrails", self.proc("> " + c)["block"], c)
 
     def test_command_substitution_refused_even_quoted(self):
         # $( ) and backticks EXECUTE even inside quotes → always refused, even for a
         # gated/allowed tool. (Plain ${VAR} parameter expansion is harmless and runs.)
         self.write(allow=["echo"])
         for c in ['echo "$(rm -rf x)"', 'echo "`rm`"']:
-            self.assertIn("gated", self.proc("> " + c)["block"], c)
+            self.assertIn("no guardrails", self.proc("> " + c)["block"], c)
 
     def test_gated_no_newline_injection(self):
         self.write()
-        self.assertIn("gated", self.proc("> ls\nrm -rf x")["block"])
+        self.assertIn("no guardrails", self.proc("> ls\nrm -rf x")["block"])
 
     def test_git_writes_refused(self):
         self.write()
         for c in ["git config user.name hacked", "git stash", "git branch -D main",
                   "git tag -d v1", "git remote add evil url"]:
-            self.assertIn("gated", self.proc("> " + c)["block"], c)
+            self.assertIn("no guardrails", self.proc("> " + c)["block"], c)
 
 
 class TestManagementCLI(Base):
@@ -406,10 +406,6 @@ class TestManagementCLI(Base):
         self.assertIn("not in the allowlist", out)
         self.assertNotIn("✔ removed", out)
 
-    def test_unlaunch_absent_is_truthful(self):
-        self.write(launch=[])
-        self.assertIn("not in the launch list", self._out(["--unlaunch", "nope"]))
-
     def test_multispace_entry_is_removable(self):
         # M4: a multi-space allow must be removable via the (space-collapsing)
         # subcommand style — both canonicalize to one entry.
@@ -431,7 +427,7 @@ class TestManagementCLI(Base):
     def test_empty_arg_says_nothing_not_config_dump(self):
         # UX10: `--allow ""` must say so, not silently dump the whole config.
         self.write(allow=[])
-        for flag in ("--allow", "--unallow", "--launch", "--unlaunch"):
+        for flag in ("--allow", "--unallow", "--launch"):
             out = self._out([flag, ""])
             self.assertIn("nothing to", out, flag)
             self.assertNotIn("sethu config", out, flag)  # not the --runner view
@@ -742,7 +738,7 @@ class TestTrust(Base):
     def test_trust_bypasses_allowlist(self):
         self.write(trust=True)  # nothing allowlisted
         r = self.proc("> echo trusted")
-        self.assertNotIn("gated", r["block"])
+        self.assertNotIn("no guardrails", r["block"])
         self.assertIn("trusted", r["block"])
 
     def test_trust_marker_in_header(self):
@@ -765,7 +761,7 @@ class TestTrust(Base):
         # With trust on, a non-gated tool runs (no refusal) — the gate is off.
         self.write(trust=True, allow=[])
         r = self.proc("> mkdir /tmp/sethu-trust-test")["block"]
-        self.assertNotIn("gated", r)
+        self.assertNotIn("no guardrails", r)
 
 
 class TestRunner(Base):
@@ -777,7 +773,7 @@ class TestRunner(Base):
         with open(script, "w") as f:
             f.write("print('hi from script')")
         r = self.proc("> python3 " + script)["block"]
-        self.assertNotIn("gated", r)
+        self.assertNotIn("no guardrails", r)
         self.assertNotIn("interactive", r)
         self.assertIn("hi from script", r)
 
@@ -788,13 +784,13 @@ class TestRunner(Base):
     def test_explicit_allow_runs(self):
         self.write(allow=["echo"])
         r = self.proc("> echo hello")
-        self.assertNotIn("gated", r["block"])
+        self.assertNotIn("no guardrails", r["block"])
         self.assertIn("hello", r["block"])
 
     def test_gated_allows_inspection(self):
         self.write()
         r = self.proc("> ls")
-        self.assertNotIn("gated", r["block"])
+        self.assertNotIn("no guardrails", r["block"])
 
     def test_completion_header(self):
         self.write()
@@ -828,17 +824,6 @@ class TestRunner(Base):
         self.assertIn("untrusted", ctx.lower())
         self.assertIn("BEGIN COMMAND OUTPUT", ctx)
         self.assertIn("hi", ctx)
-
-    def test_launch_listed_command_opens_terminal(self):
-        # A `>` command on the launch list is opened in a terminal, not captured.
-        self.write(launch=["vim"], color=False)
-        orig = _engine.launch_in_terminal
-        _engine.launch_in_terminal = lambda c: "↗ opened"
-        try:
-            r = self.proc("> vim notes.md")["block"]
-        finally:
-            _engine.launch_in_terminal = orig
-        self.assertIn("opened", r)
 
     def test_cd_to_bad_dir_message(self):
         self.write(color=False)
@@ -1088,7 +1073,7 @@ class TestShellMode(Base):
         sentinel = os.path.join(self.tmp, "H4_PWNED")
         r = self.proc(f"> cd /tmp; touch {sentinel}", sid=sid)
         self.assertIn("block", r)                 # refused…
-        self.assertIn("gated", r["block"])
+        self.assertIn("no guardrails", r["block"])
         time.sleep(0.3)                           # give any (buggy) execution a chance
         self.assertFalse(os.path.exists(sentinel), "chained cd executed in shell mode!")
 
@@ -1213,7 +1198,7 @@ class TestStateBuiltinHint(Base):
         # or substituted one is NOT auto-run.
         self.write(mode="shell", color=False)
         for c in ["export A=1; rm -rf x", "export A=$(rm x)", "unset X && rm y"]:
-            self.assertIn("gated", self.proc("> " + c)["block"], c)
+            self.assertIn("no guardrails", self.proc("> " + c)["block"], c)
 
 
 class TestRcAliases(Base):
@@ -1336,9 +1321,9 @@ class TestLaunch(Base):
         self.assertIn("aws login --token SECRET", s)
         self.assertLess(s.index('rm -f "$0"'), s.index("aws login"))  # delete first
 
-    def test_launch_registers_and_opens_now(self):
-        # `sethu --launch vi` must both add vi to the launch list AND try to open
-        # it immediately (the verb is an action, not just registration).
+    def test_launch_opens_now_and_does_not_persist(self):
+        # `sethu --launch vi` opens vi in a terminal immediately. One-shot: it stores
+        # nothing (there is no launch list), so the config is untouched.
         opened = []
         orig = _engine.launch_in_terminal
         _engine.launch_in_terminal = lambda c: opened.append(c) or "↗ opened"
@@ -1346,12 +1331,12 @@ class TestLaunch(Base):
             _engine.main(["--launch", "vi"])
         finally:
             _engine.launch_in_terminal = orig
-        self.assertEqual(opened, ["vi"])               # opened now
-        self.assertIn("vi", _engine.load_config()["launch"])  # and registered
+        self.assertEqual(opened, ["vi"])                   # opened now
+        self.assertNotIn("launch", _engine.load_config())  # and stored nothing
 
-    def test_launch_message_states_both_effects(self):
-        # UX5: --launch has a surprising DOUBLE effect (opens now AND permanently
-        # registers). The message must make both, and the persistence, explicit.
+    def test_launch_message_says_opened_one_shot(self):
+        # The message states it opened a terminal and does NOT imply persistence
+        # (no launch list, no undo) now that --launch is one-shot.
         import io, contextlib
         orig = _engine.launch_in_terminal
         _engine.launch_in_terminal = lambda c: "↗ opened in a new tmux pane"
@@ -1362,10 +1347,9 @@ class TestLaunch(Base):
         finally:
             _engine.launch_in_terminal = orig
         out = buf.getvalue()
-        self.assertIn("launch list", out)      # registered
-        self.assertIn("persistent", out)       # …and it's persistent
-        self.assertIn("opened", out.lower())   # …and opened now
-        self.assertIn("--unlaunch", out)       # how to undo
+        self.assertIn("opened", out.lower())    # opened now
+        self.assertNotIn("launch list", out)    # not registered
+        self.assertNotIn("unlaunch", out)       # nothing to undo
 
 
 class TestFirstRunHint(Base):
@@ -1506,9 +1490,9 @@ class TestConfig(Base):
     def test_gated_default_allows_inspection_refuses_rest(self):
         # With no config at all, gated tools run and everything else is refused.
         os.unlink(self.cfg)
-        self.assertNotIn("gated", self.proc("> ls")["block"])       # runs
-        self.assertIn("gated", self.proc("> rm -rf /tmp/x")["block"])  # refused
-        self.assertIn("gated", self.proc("> git log")["block"])     # git not gated
+        self.assertNotIn("no guardrails", self.proc("> ls")["block"])       # runs
+        self.assertIn("no guardrails", self.proc("> rm -rf /tmp/x")["block"])  # refused
+        self.assertIn("no guardrails", self.proc("> git log")["block"])     # git not gated
 
     def test_rc_roundtrips(self):
         _engine.main(["--rc", "on"])
@@ -1540,7 +1524,7 @@ class TestConfig(Base):
                        "prefix": 9, "mode": ["x"]}, f)
         c = _engine.load_config()
         self.assertEqual(c["allow"], [])       # non-list -> default []
-        self.assertEqual(c["launch"], [])
+        self.assertNotIn("launch", c)          # stale `launch` key is ignored (migration)
         self.assertIs(c["trust"], False)       # "on" (str) isn't a bool -> default
         self.assertEqual(c["prefix"], ">")     # non-str -> default
         self.assertEqual(c["mode"], "cwd")     # non-str -> default
@@ -1578,15 +1562,11 @@ class TestConfig(Base):
         _engine.main(["--mode", "cwd"])
         self.assertEqual(_engine.load_config()["mode"], "cwd")
 
-    def test_allow_unallow_and_unlaunch_roundtrip(self):
+    def test_allow_unallow_roundtrip(self):
         _engine.main(["--allow", "git status"])
         self.assertIn("git status", _engine.load_config()["allow"])
         _engine.main(["--unallow", "git status"])
         self.assertNotIn("git status", _engine.load_config()["allow"])
-        # unlaunch removes without opening a terminal
-        c = _engine.load_config(); c["launch"] = ["vim"]; _engine.save_config(c)
-        _engine.main(["--unlaunch", "vim"])
-        self.assertNotIn("vim", _engine.load_config()["launch"])
 
 
 class TestCustomPrefix(Base):
