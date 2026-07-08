@@ -96,6 +96,12 @@ That's it. Gated tools like `> ls` / `> grep` work immediately. For anything els
 (You manage sethu right in the prompt box: type bare `sethu` for the options menu.
 No terminal setup needed.)
 
+**Keeping sethu up to date:** sethu installs from its own marketplace, which (like all
+non-official marketplaces) doesn't auto-update by default. Either turn on auto-update once
+(recommended) via `/plugin` → **Marketplaces** → **sethu** → **Enable auto-update** (Claude
+Code then updates sethu at session start), or update by hand anytime with `/plugin
+marketplace update sethu` then `/plugin update sethu`.
+
 ---
 
 ## 📋 Cheat sheet
