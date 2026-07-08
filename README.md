@@ -136,9 +136,8 @@ Config lives in `~/.claude/sethu.json`. The full `sethu` menu has a few more kno
   across commands. It idles out after 30 min, and `sethu --restart` clears it on demand.
 - `shell` mode runs a clean `bash --norc` by default. Turn on `sethu --rc on` to source
   your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
-- `export`, `alias`, and other state-setting builtins only *persist* in `shell` mode. In
-  `cwd`/`stateless`, sethu doesn't run them and tells you they wouldn't stick (switch with
-  `sethu --mode shell`).
+- `export`, `alias`, and similar state builtins only take effect in `shell` mode, the
+  only mode that keeps state between commands.
 
 ---
 
