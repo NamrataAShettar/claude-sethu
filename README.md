@@ -119,7 +119,7 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --unlaunch "cmd"` | remove `cmd` from the launch list (go back to running it captured) |
 | `sethu --gated-list` | tools that run without asking (built-in + ones you allowed) |
 | `sethu --trust on` | ⚠ run **anything**, gate off (no guardrails) |
-| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
+| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see [below](#-statefulness-modes)) |
 | `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
 | `sethu --plain on` | `sethu:` prefix + words instead of `\|^=^\|`/glyphs (screen readers) |
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
