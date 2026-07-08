@@ -97,7 +97,8 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `>> cmd` | run it and **send output to Claude** (costs tokens) |
 | `sethu --allow "tool"` | permit a whole tool, any flags (`git`, `find`, `npm`, …); gated ones already run |
 | `sethu --unallow "tool"` | remove a tool from the allowlist |
-| `sethu --launch "cmd"` | open `cmd` in a real terminal pane (for `vim`, `top`, `ssh`, …) |
+| `sethu --launch "cmd"` | open `cmd` in a real terminal now, **and** register it so future `> cmd` opens there too (for `vim`, `top`, `ssh`, …) |
+| `sethu --unlaunch "cmd"` | remove `cmd` from the launch list (go back to running it captured) |
 | `sethu --gated-list` | tools that run without asking (built-in + ones you allowed) |
 | `sethu --trust on` | ⚠ run **anything**, gate off (no guardrails) |
 | `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
@@ -107,7 +108,8 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --timeout 60` | give commands up to 60s |
 | `sethu --runner` | show the current config (with defaults) |
 
-Config lives in `~/.claude/sethu.json`.
+Config lives in `~/.claude/sethu.json`. The full `sethu` menu has a few more knobs:
+`--prefix` (change the `>` trigger), `--color`, and `--maxlines`.
 
 > 💡 **Want ideas?** See **[docs/use-cases.md](docs/use-cases.md)** for a full,
 > copy-paste catalog covering git, file and log inspection, build and test,
@@ -134,6 +136,9 @@ Config lives in `~/.claude/sethu.json`.
   across commands. It idles out after 30 min, and `sethu --restart` clears it on demand.
 - `shell` mode runs a clean `bash --norc` by default. Turn on `sethu --rc on` to source
   your `~/.zshrc` / `~/.bashrc` so your aliases and functions work.
+- `export`, `alias`, and other state-setting builtins only *persist* in `shell` mode. In
+  `cwd`/`stateless`, sethu doesn't run them and tells you they wouldn't stick (switch with
+  `sethu --mode shell`).
 
 ---
 
