@@ -79,6 +79,13 @@ with one, either don't make it or update this doc deliberately.
   copies literally. When you change what's permitted, re-verify the doc and update it in
   the **same** change; when a use-case can be pinned as a behavior test, prefer that over
   trusting prose (e.g. `TestGatedFn.test_pipe_inside_quotes_is_not_a_chain`).
+- **One canonical description, kept consistent and accurate.** The plugin's pitch lives
+  in four places: `.claude-plugin/plugin.json` `description`, `.claude-plugin/marketplace.json`
+  (both the marketplace `description` and the plugin-entry `description`), and the **GitHub
+  repo "About"** (`gh repo edit --description "…"`). They must all tell the same story and
+  never drift or go stale (they once still said "read-only by default" long after the model
+  became "gated"). When the pitch or the model changes, update all four in the same change,
+  match the README's framing, and keep the wording plain (no "read-only"/"execs" jargon).
 - **Validate values, not just types.** A hand-edited config must never crash or
   misbehave: coerce list entries to strings, fall back an invalid mode, reject an
   empty prefix, fall back malformed numbers.

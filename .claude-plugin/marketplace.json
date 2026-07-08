@@ -1,6 +1,6 @@
 {
   "name": "sethu",
-  "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free, or share it with Claude when you want it acted on. Read-only by default.",
+  "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free (it never touches the model), or share it with Claude when you want it to act on the result. Safe inspection tools run out of the box, and anything that writes or runs other programs is added to an allowlist first.",
   "owner": {
     "name": "namrataashettar"
   },
@@ -8,7 +8,7 @@
     {
       "name": "sethu",
       "source": "./",
-      "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free (out of the model's context), or share it with Claude when you want it to act on the result. It's read-only by default, so any command that writes has to be added to an allowlist first."
+      "description": "Run terminal commands from Claude Code's prompt box: see the output yourself for free (it never touches the model), or share it with Claude when you want it to act on the result. Safe inspection tools run out of the box, and anything that writes or runs other programs is added to an allowlist first."
     }
   ]
 }
