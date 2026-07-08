@@ -29,7 +29,7 @@ sethu --allow git     # opt a whole tool in (git/find/npm/…); safe tools like 
 
 Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=^|" height="13"> bridge, so sethu's output is easy to spot.
 
-`> git status` — you see the result yourself, for free (the model never sees it):
+`> git status` shows you the result, for free (the model never sees it):
 
 ![sethu running "> git status": the git output under a teal |^=^| header, marked exit 0, at zero tokens](assets/git_status_sethu.png)
 
