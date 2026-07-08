@@ -1454,9 +1454,16 @@ def _apply_cli_mutations(a, cfg):
         print(f"✔ mode: {a.mode}{note}")
         changed = True
     if a.prefix:
-        cfg["prefix"] = a.prefix
-        print(f"✔ prefix: {a.prefix!r}")
-        changed = True
+        if a.prefix[0] in ("!", "/"):
+            special = "bang (bash) mode" if a.prefix[0] == "!" else "slash commands"
+            print(f"can't set the prefix to {a.prefix!r}: Claude Code intercepts a leading "
+                  f"{a.prefix[0]!r} for {special} before sethu's hook sees it, so it would "
+                  f"never trigger. Pick another prefix (the default is '>').")
+            noop = True
+        else:
+            cfg["prefix"] = a.prefix
+            print(f"✔ prefix: {a.prefix!r}")
+            changed = True
     if a.color:
         cfg["color"] = (a.color == "on")
         print(f"✔ color: {a.color}")

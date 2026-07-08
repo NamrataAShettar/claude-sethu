@@ -380,6 +380,17 @@ class TestManagementCLI(Base):
                   "Gated by default"]:
             self.assertIn(t, out, t)
 
+    def test_prefix_bang_and_slash_refused(self):
+        # `!` (bang mode) and `/` (slash commands) are intercepted by Claude Code before
+        # sethu's UserPromptSubmit hook, so a prefix starting with either would never
+        # trigger. Refuse it instead of silently storing a dead prefix.
+        for p in ("!", "/", "!run", "/x"):
+            out = self._out(["--prefix", p])
+            self.assertIn("never trigger", out, p)
+            self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
+        self._out(["--prefix", "»"])                                 # a normal one works
+        self.assertEqual(_engine.load_config()["prefix"], "»")
+
     def test_runner_and_show_print_config(self):
         for flag in (["--runner"], ["--show"]):
             out = self._out(flag)
@@ -1573,8 +1584,8 @@ class TestConfig(Base):
         self.assertFalse(_engine.load_config()["color"])
         _engine.main(["--maxlines", "100"])
         self.assertEqual(_engine.load_config()["maxLines"], 100)
-        _engine.main(["--prefix", "!!"])
-        self.assertEqual(_engine.load_config()["prefix"], "!!")
+        _engine.main(["--prefix", "»"])
+        self.assertEqual(_engine.load_config()["prefix"], "»")
         _engine.main(["--mode", "cwd"])
         self.assertEqual(_engine.load_config()["mode"], "cwd")
 
