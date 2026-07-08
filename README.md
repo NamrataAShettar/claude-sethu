@@ -2,17 +2,19 @@
 
 # sethu: a bridge between Claude Code's prompt box and your shell
 
+*The name sethu is Sanskrit for "bridge", a word shared across Indian languages.*
+
 Run terminal commands **right in the Claude Code prompt box**, see the output
 yourself for **free** (it never touches the model), and share it with Claude only
-when you want it to act on the result. (*sethu* is Sanskrit for *"bridge"*.)
+when you want it to act on the result.
 
-### The problem
+### ⚠️ The problem
 
-Every command you ask Claude to run dumps its output into the context window. That
+Every terminal command you ask Claude to run dumps its output into the context window. That
 **costs tokens**, **clutters the conversation**, and fills your context faster (so
 auto-compaction hits sooner). Alt-tabbing to a real terminal breaks your flow.
 
-### What sethu does
+### <img src="assets/sethu-icon.svg" alt="|^=^|" height="18"> What sethu does
 
 Type a command with a `>` prefix as an ordinary message. A `UserPromptSubmit` hook
 runs it locally and blocks the prompt, so **the model never sees it and you spend
@@ -25,8 +27,7 @@ sethu --allow git     # opt a whole tool in (git/find/npm/…); safe tools like 
 > git status          # now runs (git was allowed above)
 ```
 
-Every result is tagged with the little `|^=^|` bridge, so sethu's output is easy
-to spot.
+Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=^|" height="13"> bridge, so sethu's output is easy to spot.
 
 ---
 
