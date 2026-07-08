@@ -2,7 +2,7 @@
   "name": "sethu",
   "displayName": "sethu: command bridge",
   "version": "0.11.6",
-  "description": "Run terminal commands from Claude Code's prompt box itself and see the output yourself for free (it never enters the model's context). Share it with Claude only when you want it acted on. Gated by default: safe inspection tools work out of the box.",
+  "description": "Run terminal commands right in the Claude Code prompt box and see the output yourself for free (it never enters the model's context). Share it with Claude only when you want it acted on. Gated by default: safe inspection tools work out of the box.",
   "author": {
     "name": "namrataashettar"
   },
