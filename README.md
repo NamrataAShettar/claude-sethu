@@ -1,24 +1,19 @@
-<p align="center"><img src="assets/sethu-icon.svg" alt="|^=^|" height="44"></p>
-
-# sethu: a bridge between Claude Code's prompt box and your shell
+# <img src="assets/sethu-icon.svg" alt="|^=^|" height="26"> sethu: a bridge between Claude Code's prompt box and your shell
 
 *The name sethu is Sanskrit for "bridge", a word shared across Indian languages.*
-
-Run terminal commands **right in the Claude Code prompt box**, see the output
-yourself for **free** (it never touches the model), and share it with Claude only
-when you want it to act on the result.
 
 ### ⚠️ The problem
 
 Every terminal command you ask Claude to run dumps its output into the context window. That
 **costs tokens**, **clutters the conversation**, and fills your context faster (so
-auto-compaction hits sooner). Alt-tabbing to a real terminal breaks your flow.
+auto-compaction hits sooner). Switching to a separate terminal breaks your flow.
 
 ### <img src="assets/sethu-icon.svg" alt="|^=^|" height="18"> What does sethu do?
 
-Type a command with a `>` prefix as an ordinary message. A `UserPromptSubmit` hook
-runs it locally and blocks the prompt, so **the model never sees it and you spend
-nothing**. Use `>>` when you *do* want Claude to see the output.
+Run terminal commands **right in the Claude Code prompt box**. Type a command with a `>`
+prefix as an ordinary message, and a `UserPromptSubmit` hook runs it locally and blocks the
+prompt, so **you see the output for free and the model never sees it**. Use `>>` instead
+when you *do* want Claude to see the result and act on it.
 
 ```text
 > grep -n TODO src/   # runs it, shows YOU the output (zero tokens, model never sees it)
@@ -27,7 +22,7 @@ sethu --allow git     # opt a whole tool in (git/find/npm/…); safe tools like 
 > git status          # now runs (git was allowed above)
 ```
 
-Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=^|" height="13"> bridge, so sethu's output is easy to spot.
+Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=^|" height="15"> bridge, so sethu's output is easy to spot.
 
 `> git status` shows you the result, for free (the model never sees it):
 
@@ -54,7 +49,7 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
   tools (`ls`, `cat`, `grep`, `jq`, …) just works, while everything else is refused
   until you `--allow` that tool (or `--trust on` for everything).
 - **🪶 No package installs.** Pure Python standard library: no `pip`, no npm, no
-  third-party packages to manage. (See Requirements before you start.)
+  third-party packages to manage. (It just needs `python3`, see [Install](#-install).)
 
 > **sethu vs. `!` bang mode:** `!` always feeds output to Claude, so it always
 > costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
@@ -65,24 +60,6 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
 
 ## 📦 Install
 
-**Requirements:**
-
-- [Claude Code](https://claude.com/claude-code).
-- **`python3` (3.9 or newer)** on your `PATH`. sethu's hooks run it. Check with
-  `python3 --version`.
-  - Most Linux distros already include it.
-  - macOS often doesn't ship it. Install via [Homebrew](https://brew.sh)
-    (`brew install python`), the Xcode Command Line Tools (`xcode-select --install`), or
-    [python.org](https://www.python.org/downloads/).
-  - If it's missing, sethu tells you at session start and goes quiet, so your prompts
-    still work normally.
-- **Platform.** The plain `>` / `cwd` / `stateless` runner works everywhere. Shell mode and
-  `--launch` are the only OS-sensitive parts:
-  - **macOS:** both work.
-  - **Linux:** shell mode works. **`--launch` needs `tmux`** (no native Linux-terminal
-    support yet). Without tmux, run the command in your own terminal.
-  - **Windows:** use **WSL** (shell mode works there). **`--launch` needs `tmux`.**
-
 Inside a Claude Code session:
 
 ```
@@ -91,18 +68,39 @@ Inside a Claude Code session:
 /reload-plugins
 ```
 
-That's it. Gated tools like `> ls` / `> grep` work immediately. For anything else
-(git, find, npm, …), allow the tool once: `sethu --allow git`.
+That's it. Gated tools like `> ls` / `> grep` work immediately (`sethu --gated-list` shows the whole set). For anything else
+(git, find, npm, …), allow the tool once: `sethu --allow git`. (Manage sethu right in the
+prompt box: type bare `sethu` for the menu, no terminal setup needed.)
 
-(You manage sethu right in the prompt box: type bare `sethu` for the options menu.
-No terminal setup needed.)
+**Needs** [Claude Code](https://claude.com/claude-code) and **Python 3.9+** (`python3 --version`).
 
-**Keeping sethu up to date:** sethu installs from its own marketplace, which (like all
-non-official marketplaces) doesn't auto-update by default. Two ways to stay current:
+<details>
+<summary><b>🐍 Installing python3, and OS support</b></summary>
+
+- Most Linux distros already include python3. macOS often doesn't: install via
+  [Homebrew](https://brew.sh) (`brew install python`), the Xcode Command Line Tools
+  (`xcode-select --install`), or [python.org](https://www.python.org/downloads/). If it's
+  missing, sethu tells you at session start and goes quiet, so your prompts still work.
+- The plain `>` / `cwd` / `stateless` runner works everywhere. Shell mode and `--launch`
+  are the only OS-sensitive parts:
+  - **macOS:** both work.
+  - **Linux:** shell mode works. `--launch` needs `tmux` (no native Linux-terminal support
+    yet). Without tmux, run the command in your own terminal.
+  - **Windows:** use **WSL** (shell mode works there). `--launch` needs `tmux`.
+
+</details>
+
+<details>
+<summary><b>🔄 Keeping sethu up to date</b></summary>
+
+sethu installs from its own marketplace, which (like all non-official marketplaces) doesn't
+auto-update by default. Two ways to stay current:
 
 - **Auto (recommended):** `/plugin` → **Marketplaces** → **sethu** → **Enable auto-update**.
   Claude Code then updates sethu at session start.
 - **By hand, anytime:** `/plugin marketplace update sethu`, then `/plugin update sethu`.
+
+</details>
 
 ---
 
@@ -121,7 +119,7 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --unlaunch "cmd"` | remove `cmd` from the launch list (go back to running it captured) |
 | `sethu --gated-list` | tools that run without asking (built-in + ones you allowed) |
 | `sethu --trust on` | ⚠ run **anything**, gate off (no guardrails) |
-| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see below) |
+| `sethu --mode stateless\|cwd\|shell` | switch statefulness (default `cwd`; `shell` makes `cd`/`export`/venv stick, see [below](#-statefulness-modes)) |
 | `sethu --rc on` | in `shell` mode, load your shell aliases/functions/env |
 | `sethu --plain on` | `sethu:` prefix + words instead of `\|^=^\|`/glyphs (screen readers) |
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
@@ -195,7 +193,7 @@ When a command isn't gated, the refusal tells you *why* and hands you the ways f
 sethu is a hook, and hooks have boundaries. Here's where it can't help, and what
 to do instead:
 
-| Situation | Why | Do this instead |
+| Situation | Why? | Do this instead |
 | --- | --- | --- |
 | **Claude is still generating** ("pondering") | The hook only fires on a prompt that *starts* a turn. A `> cmd` typed mid-turn is queued and read by the **model** (costs tokens), not run by sethu. | Send `> cmd` when Claude is idle, or run things in a separate terminal / `sethu --launch <shell>`. |
 | **Interactive programs** (`vim`, `top`, `ssh`, a bare REPL) | The runner has no terminal, so they'd hang. | `sethu --launch "vim"` opens a real pane (macOS or tmux; on plain Linux/WSL, run it in your own terminal). |
@@ -232,7 +230,7 @@ to do instead:
   in a real terminal with `sethu --launch`.
 - **Nothing happens at all (or a "sethu needs python3" note at session start)**: sethu's
   hooks run on `python3`. If it isn't on your `PATH`, sethu goes inactive (your prompts
-  still work normally). Install python3 (see Requirements), then `/reload-plugins`.
+  still work normally). Install python3 (see [Install](#-install)), then `/reload-plugins`.
 
 Still stuck? [Open an issue](https://github.com/NamrataAShettar/claude-sethu/issues).
 
