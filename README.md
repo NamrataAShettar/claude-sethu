@@ -67,8 +67,11 @@ Every result is tagged with the little <img src="assets/sethu-icon.svg" alt="|^=
   [python.org](https://www.python.org/downloads/). Most Linux distros already
   include it. (If it's missing, sethu tells you at session start and stays out of
   your way, so your prompts still work normally, rather than erroring.)
-- **macOS or Linux.** Shell mode and `--launch` are Unix-only. On Windows, use
-  WSL. (The plain `>` / `cwd` / `stateless` runner is otherwise portable.)
+- **macOS or Linux (WSL on Windows).** The plain `>` / `cwd` / `stateless` runner is
+  fully portable. **Shell mode** needs Unix (PTY + sockets): macOS, Linux, or WSL.
+  **`--launch` auto-opens a terminal only on macOS or inside `tmux`.** On plain Linux
+  or WSL without tmux it registers the command but can't open a window, so run it in
+  your own terminal (native Linux-terminal support isn't there yet).
 
 Inside a Claude Code session:
 
@@ -174,11 +177,11 @@ to do instead:
 | Situation | Why | Do this instead |
 | --- | --- | --- |
 | **Claude is still generating** ("pondering") | The hook only fires on a prompt that *starts* a turn. A `> cmd` typed mid-turn is queued and read by the **model** (costs tokens), not run by sethu. | Send `> cmd` when Claude is idle, or run things in a separate terminal / `sethu --launch <shell>`. |
-| **Interactive programs** (`vim`, `top`, `ssh`, a bare REPL) | The runner has no terminal, so they'd hang. | `sethu --launch "vim"` opens a real pane. |
+| **Interactive programs** (`vim`, `top`, `ssh`, a bare REPL) | The runner has no terminal, so they'd hang. | `sethu --launch "vim"` opens a real pane (macOS or tmux; on plain Linux/WSL, run it in your own terminal). |
 | **Commands that prompt for input** (`npm install` conflicts, `apt install` "[Y/n]", `gh auth login`) | Even shell mode can't *type back* at a prompt. | Use non-interactive flags (`-y`, `--yes`, `DEBIAN_FRONTEND=noninteractive`) or `--launch`. |
 | **Long-running commands** (servers, `tail -f`) | Capped at 20s (`sethu --timeout` to raise, but the hook budget is ~30s). | Run them in a launched pane. |
 | **Different modes in two sessions at once** | Settings (mode, allowlist, trust) live in one shared config, so `sethu --mode` / `--allow` apply to **all** your Claude sessions. (Each session's working dir and `shell` bash stay separate.) | Set the mode you need for now; you can't run one session in `shell` and another in `cwd` simultaneously. |
-| **Windows (native)** | Shell mode + `--launch` need Unix sockets/PTYs. | Use WSL. |
+| **Windows (native)** | Shell mode needs Unix sockets/PTYs; `--launch` needs macOS or tmux. | Use WSL (with `tmux` for `--launch`). |
 | **`--allow`-ed git in an untrusted repo** | once you `--allow git`, `> git status`/`diff` run programs named in the repo's own `.git/config` (`core.fsmonitor`, `diff.external`, …), which is git's own behavior, the same as in your terminal. | Don't run git in a repo you don't trust; git's `safe.directory` only guards other-owner repos. |
 
 > A **launched** terminal (`--launch`) is a *plain shell*. It does **not** share
