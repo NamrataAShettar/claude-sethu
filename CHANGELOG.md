@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/NamrataAShettar/claude-sethu/compare/v0.12.0...v0.12.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* message consistency + humane-tone guideline + PR test-plan template ([#23](https://github.com/NamrataAShettar/claude-sethu/issues/23)) ([9c611ab](https://github.com/NamrataAShettar/claude-sethu/commit/9c611ab9a6977b2ea6dc690f4b513ad68f37938d))
+
 ## [0.12.0](https://github.com/NamrataAShettar/claude-sethu/compare/v0.11.7...v0.12.0) (2026-07-09)
 
 
