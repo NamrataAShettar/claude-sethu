@@ -290,6 +290,8 @@ class TestSafety(Base):
     def test_not_allowed_refused(self):
         r = self.proc("> rm -rf /tmp/x")
         self.assertIn("no guardrails", r["block"])
+        self.assertIn('sethu --allow "rm"', r["block"])   # the actionable path is offered
+        self.assertNotIn("gated-list", r["block"])         # menu no longer points there
 
     def test_gated_blocks_dangerous(self):
         self.write()
