@@ -58,6 +58,10 @@ with one, either don't make it or update this doc deliberately.
   step.
 - **Truthful feedback.** Only report success when something actually changed
   (`✔ added` / `already allowed` / `not in list`, not always `✔`).
+- **Humane, respectful tone; never curt.** Messages read like a considerate person, not
+  a terse machine. When sethu can't do something, acknowledge it and offer the way forward
+  politely ("Please run it in your own terminal", not "Run it yourself" or "Run it
+  instead"). If warmth and brevity conflict, keep the warmth.
 - **Plain, natural language.** No em-dashes; commas/colons/parentheses instead.
   Concrete over jargon ("gated won't run it automatically", not "isn't
   auto-allowed"). Concise; say each thing once. **Scope:** this governs everything a
