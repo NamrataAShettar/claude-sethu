@@ -65,6 +65,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   unterminated-quote command refused     TestHookOutput                         [x]
   first-run hint skips if unwritable     TestFirstRunHint                       [x]
   orphaned socket + cwd file swept       TestSweep                              [x]
+  bug-bash regression fixes (misc)       TestBugBash2                           [x]
 """
 import json
 import os
