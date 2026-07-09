@@ -22,17 +22,20 @@ cover --launch, shell mode, or macOS, so note manual verification for those. -->
 
 ### Test plan
 
-<!-- Enumerate the scenarios this change can produce, and mark whether each is covered
-and how: `unit` (name the test that was added/updated), `manual` (verified by hand, per
-docs/testing.md), or `n/a`. Be honest about anything NOT covered (a real terminal, macOS,
-a live Claude Code session). This is the honest map of "what could happen and did we
-check it", beyond just "tests pass". -->
+<!-- Enumerate EVERY scenario this change can produce, not only the ones you wrote a unit
+test for. Behaviors that CANNOT be unit-tested (a real terminal, macOS, tmux, a live Claude
+Code session, a screenshot) still belong here as a `manual` row: that is the point. Mark
+each:
+  - Covered?  ✅ a test covers it  /  🖐 verified by hand  /  ❌ not covered (say so honestly)
+  - How:  `unit: test_name`,  or  `manual, per docs/testing.md`,  or why it isn't covered.
+This is the honest map of "what could happen and how we actually checked it", beyond "the
+suite passes". -->
 
 | Scenario | Covered? | How |
 | --- | --- | --- |
-| happy path | ✅ | unit: `test_...` |
-| edge / failure case | ✅ | unit: `test_...` |
-| can't be unit-tested (real terminal / macOS / live) | 🖐 or n/a | manual, per docs/testing.md |
+| <happy path> | ✅ | unit: `test_...` |
+| <edge / failure case> | ✅ | unit: `test_...` |
+| <behavior with no unit test: real terminal / macOS / screenshot> | 🖐 | manual, per docs/testing.md |
 
 
 ## Checklist
