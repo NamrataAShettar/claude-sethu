@@ -29,8 +29,8 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --plain on/off (spoken/screen-reader)  TestPlainMode                          [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
-  --prefix (custom trigger)              TestCustomPrefix, TestConfig,          [x]
-                                         TestHookGate
+  --prefix (custom trigger + guard)      TestCustomPrefix, TestConfig,          [x]
+                                         TestHookGate, TestManagementCLI
   --restart                              TestManagementCLI, TestKillDaemons     [x]
   --runner / --show (config)             TestManagementCLI, TestHookOutput      [x]
   bare `sethu` (help menu)               TestManagementCLI                      [x]
