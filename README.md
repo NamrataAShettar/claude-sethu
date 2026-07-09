@@ -160,14 +160,14 @@ Config lives in `~/.claude/sethu.json`. The full `sethu` menu has a few more kno
 
 ## 🛡️ Safety
 
-When a command isn't gated, the refusal tells you *why* and hands you the ways forward:
-
-![sethu refusing "> rm foo" because rm can change files, listing options: allow the tool, open in a terminal, or trust everything](assets/sethu_refusal.png)
-
 - **Gated by default.** Tools that can't write files or run other programs, whatever
   the flags (`ls`, `cat`, `grep`, `jq`, …), run automatically. Anything that *can*
   (`git`, `find`, `npm`, …) waits for `sethu --allow`. sethu judges the whole tool, not
   individual flags, so a tool is allowed entirely or not at all.
+
+  When a command isn't gated, the refusal tells you *why* and hands you the ways forward:
+
+  ![sethu refusing "> rm foo" because rm can change files, listing options: allow the tool, open in a terminal, or trust everything](assets/sethu_refusal.png)
 - **A guardrail, not a sandbox.** You can always bypass it: your own terminal, or
   widening the gate with `--allow` or `--trust`. (In **shell mode**, an alias or `PATH`
   you set sticks, so a later command runs whatever you redefined it to, exactly like a
