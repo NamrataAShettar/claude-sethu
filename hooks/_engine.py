@@ -63,6 +63,13 @@ DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [], "launch": [],
 # GATED tool set + your --allow'd tools run); `trust: True` ungates everything. An
 # old config's stale `readonly` key is simply ignored by load_config (not in DEFAULTS).
 MODES = ("stateless", "cwd", "shell")
+# Leading characters Claude Code's input box reserves for its own modes — shell/bang mode
+# (`!`), slash commands (`/`), and file/MCP mentions (`@`) — documented at
+# code.claude.com/docs/en/interactive-mode.md. A prompt starting with one is handled by
+# Claude Code's UI and never reaches sethu's UserPromptSubmit hook, so it can't be a sethu
+# prefix. There's no API to query this set, so it's hardcoded: update here if Claude Code
+# changes or adds one (last checked 2026-07-08).
+_RESERVED_PREFIXES = {"!": "shell/bang mode", "/": "slash commands", "@": "file mentions"}
 
 
 def cmd_timeout(cfg=None):
@@ -1454,9 +1461,19 @@ def _apply_cli_mutations(a, cfg):
         print(f"✔ mode: {a.mode}{note}")
         changed = True
     if a.prefix:
-        cfg["prefix"] = a.prefix
-        print(f"✔ prefix: {a.prefix!r}")
-        changed = True
+        reserved = _RESERVED_PREFIXES.get(a.prefix[0])
+        if reserved:
+            print(f"can't use {a.prefix!r}: Claude Code reserves a leading {a.prefix[0]!r} "
+                  f"for {reserved}, so sethu never sees it. Pick another prefix (default '>').")
+            noop = True
+        elif len(a.prefix) != 1:
+            print("the prefix must be a single character (default '>'): sethu doubles it "
+                  "for sharing (like `>>`), which only reads cleanly with one char.")
+            noop = True
+        else:
+            cfg["prefix"] = a.prefix
+            print(f"✔ prefix: {a.prefix!r}")
+            changed = True
     if a.color:
         cfg["color"] = (a.color == "on")
         print(f"✔ color: {a.color}")

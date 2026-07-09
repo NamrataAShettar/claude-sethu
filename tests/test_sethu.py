@@ -29,8 +29,8 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --plain on/off (spoken/screen-reader)  TestPlainMode                          [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
-  --prefix (custom trigger)              TestCustomPrefix, TestConfig,          [x]
-                                         TestHookGate
+  --prefix (custom trigger + guard)      TestCustomPrefix, TestConfig,          [x]
+                                         TestHookGate, TestManagementCLI
   --restart                              TestManagementCLI, TestKillDaemons     [x]
   --runner / --show (config)             TestManagementCLI, TestHookOutput      [x]
   bare `sethu` (help menu)               TestManagementCLI                      [x]
@@ -379,6 +379,23 @@ class TestManagementCLI(Base):
         for t in ["sethu:", "> cmd", ">> cmd", "--allow", "--launch", "--runner",
                   "Gated by default"]:
             self.assertIn(t, out, t)
+
+    def test_prefix_reserved_or_multichar_refused(self):
+        # `!` (shell/bang mode), `/` (slash commands), and `@` (file mentions) are reserved
+        # by Claude Code's UI and never reach sethu's hook, so a prefix starting with any of
+        # them would never trigger. Refuse instead of silently storing a dead prefix.
+        for p in ("!", "/", "@", "!run", "/x", "@f"):
+            out = self._out(["--prefix", p])
+            self.assertIn("reserves", out, p)
+            self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
+        # A multi-char prefix is refused too: sethu doubles it for share (`>>`), which only
+        # reads cleanly as a single char.
+        for p in (">>", "::", "sh"):
+            out = self._out(["--prefix", p])
+            self.assertIn("single character", out, p)
+            self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
+        self._out(["--prefix", "»"])                                 # a single char works
+        self.assertEqual(_engine.load_config()["prefix"], "»")
 
     def test_runner_and_show_print_config(self):
         for flag in (["--runner"], ["--show"]):
@@ -1573,8 +1590,8 @@ class TestConfig(Base):
         self.assertFalse(_engine.load_config()["color"])
         _engine.main(["--maxlines", "100"])
         self.assertEqual(_engine.load_config()["maxLines"], 100)
-        _engine.main(["--prefix", "!!"])
-        self.assertEqual(_engine.load_config()["prefix"], "!!")
+        _engine.main(["--prefix", "»"])
+        self.assertEqual(_engine.load_config()["prefix"], "»")
         _engine.main(["--mode", "cwd"])
         self.assertEqual(_engine.load_config()["mode"], "cwd")
 
