@@ -220,7 +220,7 @@ to do instead:
   while Claude was still generating. sethu only fires on a prompt that *starts* a turn,
   so a `>` typed mid-response is read by the model (and costs tokens), not run by sethu.
   Send `> cmd` when Claude is idle.
-- **"`X` isn't in the gated set."**: sethu is gated by default, and the message says why
+- **"`X` can change files or run other programs, so sethu doesn't run it automatically."**: sethu is gated by default, and the message says why
   (e.g. `git`/`npm` can write or run other programs). Permit it with `sethu --allow X`
   (the whole tool). If it's interactive (`vim`, a bare REPL), use `sethu --launch "X"`
   instead, since allowlisting can't make those run. `sethu --trust on` drops all guardrails,

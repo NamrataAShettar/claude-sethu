@@ -302,7 +302,7 @@ def _truncate(out, sid, cap, on, plain=False):
         path = None
     hidden = total - cap
     shown = "\n".join(head[:cap])
-    where = (f"full output — view it with `sethu --launch \"less {path}\"`"
+    where = (f"full output: view it with `sethu --launch \"less {path}\"`"
              if path else "full output unavailable (couldn't write temp file)")
     lead, sep = ("...", "-") if plain else ("…", "·")
     note = f"{lead} {hidden} more line{'s' if hidden != 1 else ''} truncated {sep} {where}"
@@ -323,8 +323,8 @@ FIRST_RUN_HINT = (
     "• `> grep -n TODO src/`  → runs it, shows output to YOU only. Free (Claude "
     "never sees it).\n"
     "• `>> grep -n TODO src/` → runs it AND sends the output to Claude (costs tokens).\n"
-    "Works when Claude is idle (a `>` typed while Claude is thinking goes to the "
-    "model). Safe tools (ls/cat/grep/jq…) work now; for git/find/npm/… run "
+    "Works when Claude is idle (a `>` typed while Claude is thinking goes to "
+    "Claude). Safe tools (ls/cat/grep/jq…) work now; for git/find/npm/… run "
     "`sethu --allow <tool>` once. Type `sethu` for the menu. Screen reader? Please use "
     "`sethu --plain on` for spoken-friendly output."
 )
@@ -815,7 +815,7 @@ def run_capture(cmd, cwd=None, timeout=None):
         # Lead with the note so it survives the maxLines display truncation (an 8 MB
         # runaway is always truncated, which would bury a trailing note).
         mb = MAX_CAPTURE_BYTES // (1024 * 1024)
-        note = f"[output capped at {mb} MB — the command produced more and was stopped]"
+        note = f"[output capped at {mb} MB: the command produced more and was stopped]"
         return ((note + "\n" + out).strip(), None)
     return (out.strip() or "(no output)", code)
 
@@ -1060,7 +1060,7 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
             return (partial + _timeout_msg(timeout or cmd_timeout(), cmd), None)
         if first.strip() == "CAPPED":
             mb = MAX_CAPTURE_BYTES // (1024 * 1024)
-            note = f"[output capped at {mb} MB — the command produced more and was stopped]"
+            note = f"[output capped at {mb} MB: the command produced more and was stopped]"
             body = rest.strip()
             return ((note + "\n" + body if body else note), None)
         if first.strip().lstrip("-").isdigit():
@@ -1080,7 +1080,7 @@ def shell_run(sid, cmd, cwd_hint=None, use_rc=False, timeout=None):
 
 # ── the core: process one submitted prompt ────────────────────────────────────
 # No leading icon/`sethu:` — the hook's `_lead` adds it (colored, or `sethu:` in plain).
-HELP = ("type `> <command>` to run it (free — gated tools like ls/cat/grep run now), or "
+HELP = ("type `> <command>` to run it (free: gated tools like ls/cat/grep run now), or "
         "`>> <command>` to also send its output to Claude.\n"
         "Manage it: `sethu --allow \"<tool>\"`, `sethu --mode cwd|shell|stateless`, "
         "`sethu --runner`.")
@@ -1103,7 +1103,7 @@ def _why_refused(cmd, cfg):
                 f"automatically.")
     if _DANGER.search(cmd):
         return ("sethu won't run commands joined by `;`, `&&`, `&`, redirects (`>`), or "
-                "`$(…)` — run the parts as separate `>` commands.")
+                "`$(…)`. Run the parts as separate `>` commands.")
     if prog not in GATED:
         return (f"`{prog}` can change files or run other programs, so sethu doesn't run "
                 f"it automatically.")
@@ -1221,7 +1221,7 @@ def process(prompt, data):
         # One plain reason line (specific why, else a generic fallback), then the
         # actions once. A chain can't be fixed by allowing a tool (the guard refuses
         # chaining regardless), so drop the "Allow this tool" bullet for those.
-        reason = _why_refused(cmd, cfg) or ("sethu doesn't run this automatically — "
+        reason = _why_refused(cmd, cfg) or ("sethu doesn't run this automatically: "
             "part of it can change files or run other programs.")
         b = "-" if plain else "•"
         bullets = []
@@ -1366,7 +1366,7 @@ class _Parser(argparse.ArgumentParser):
         hint = ""
         if message.startswith("unrecognized arguments"):
             # The usual cause: extra words after a one-value flag (`--allow ls echo`).
-            hint = _c("\n  a flag takes ONE value — quote a multi-word command "
+            hint = _c("\n  a flag takes ONE value: quote a multi-word command "
                       "(`sethu --allow \"git status\"`), or allow tools one at a time.",
                       "dim", on)
         sys.stderr.write(
@@ -1417,7 +1417,7 @@ def _apply_cli_mutations(a, cfg):
             print("nothing to allow (the command was empty)."); noop = True
         elif _is_chain_unsafe(val):
             print(f"won't allowlist a chain: {val!r}. sethu allows tools, not chained "
-                  f"commands — allow the tools you need individually (one `sethu --allow "
+                  f"commands: allow the tools you need individually (one `sethu --allow "
                   f"<tool>` each) and run the parts as separate `>` commands, or "
                   f"`sethu --trust on` to run everything."); noop = True
         elif val in cfg["allow"]:
@@ -1428,7 +1428,7 @@ def _apply_cli_mutations(a, cfg):
             tool = os.path.basename(val.split()[0]) if val.split() else ""
             if tool in _LAUNCHERS:
                 print(f"  ⚠ `{tool}` can run other programs, so allowing it lets "
-                      f"`{tool} …` run anything — closer to trust than a single tool. "
+                      f"`{tool} …` run anything, closer to trust than a single tool. "
                       f"Your call; `sethu --unallow {tool}` to undo.")
     if a.launch is not None:
         val = " ".join(a.launch.split())
@@ -1480,7 +1480,7 @@ def _apply_cli_mutations(a, cfg):
         changed = True
     if a.plain:
         cfg["plain"] = (a.plain == "on")
-        print(f"✔ plain: {a.plain} (`sethu:` prefix + words, no glyphs — for screen "
+        print(f"✔ plain: {a.plain} (`sethu:` prefix + words, no glyphs, for screen "
               f"readers / plain terminals)")
         changed = True
     if a.maxlines is not None:
@@ -1492,23 +1492,23 @@ def _apply_cli_mutations(a, cfg):
         cfg["timeout"] = max(1, a.timeout)
         killed = kill_daemons()  # so shell-mode daemons pick up the new timeout
         note = f" (restarted {killed} shell daemon(s))" if killed else ""
-        warn = "  ⚠ over the ~30s hook budget — Claude Code may cut it off first." \
+        warn = "  ⚠ over the ~30s hook budget: Claude Code may cut it off first." \
             if cfg["timeout"] > 28 else ""
         print(f"✔ timeout: {cfg['timeout']}s{note}{warn}")
         changed = True
     if a.trust:
         cfg["trust"] = (a.trust == "on")
         if cfg["trust"]:
-            print("⚠ trust ON — the gate is off; ANY `>` command will run, with no "
-                  "permission prompt. Turn it back on with `sethu --trust off`.")
+            print("⚠ trust ON: the gate is off; ANY `>` command will run, with no "
+                  "permission prompt. Turn it back off with `sethu --trust off`.")
         else:
-            print("✔ trust: off — gated again (only safe tools + your --allow'd run).")
+            print("✔ trust: off, gated again (only safe tools + your --allow'd run).")
         changed = True
     if a.rc:
         cfg["rc"] = (a.rc == "on")
         killed = kill_daemons()  # restart so the new shell takes effect
         note = f" (restarted {killed} shell daemon(s))" if killed else " (shell restarted)"
-        extra = (" — your shell's aliases/functions/env now load in shell mode"
+        extra = (" (your shell's aliases/functions/env now load in shell mode)"
                  if cfg["rc"] else "")
         print(f"✔ rc: {a.rc}{note}{extra}")
         changed = True
@@ -1574,7 +1574,7 @@ def main(argv=None):
         print(gated_list_text(load_config()))
         return
     if a.restart:
-        print(f"✔ restarted {kill_daemons()} shell daemon(s) — fresh state next command")
+        print(f"✔ restarted {kill_daemons()} shell daemon(s): fresh state next command")
         return
     # --rc is a config mutation (bool + daemon restart), so it goes through the normal
     # mutation block below — NOT an early return — otherwise `--rc on --mode shell` would
@@ -1599,7 +1599,7 @@ def main(argv=None):
 
 def _print_config(cfg):
     """Pretty-print the effective config (the `sethu` / `--runner` view)."""
-    trust_disp = "on ⚠ gate off — everything runs" if cfg.get("trust") else "off (gated)"
+    trust_disp = "on ⚠ gate off, everything runs" if cfg.get("trust") else "off (gated)"
     ml = max_lines(cfg)
     print(f"config ({config_path()}):")   # the `sethu:`/icon lead is added by `_lead`
     print(f"  prefix:   {cfg['prefix']!r}   (default '>'; > run+block free, >> send to Claude)")
@@ -1607,7 +1607,7 @@ def _print_config(cfg):
     print(f"  trust:    {trust_disp}   (default off; off = gated safe tools + your --allow'd)")
     print(f"  rc:       {'on' if cfg.get('rc') else 'off'}   (default off; shell mode sources your shell rc)")
     print(f"  color:    {'on' if cfg.get('color', True) else 'off'}   (default on; colored result header)")
-    print(f"  plain:    {'on' if cfg.get('plain') else 'off'}   (default off; `sethu:` prefix + words, no glyphs — for screen readers)")
+    print(f"  plain:    {'on' if cfg.get('plain') else 'off'}   (default off; `sethu:` prefix + words, no glyphs, for screen readers)")
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (default 40; truncate long output, full saved to a file)")
     print(f"  timeout:  {cmd_timeout(cfg)}s   (default 20s; max seconds a command may run)")
     print(f"  allow:    {cfg['allow']}   (gated tools + these run; `--gated-list` to see all)")
