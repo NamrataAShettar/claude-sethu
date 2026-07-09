@@ -1353,6 +1353,22 @@ class TestLaunch(Base):
         self.assertNotIn("launch list", out)    # not registered
         self.assertNotIn("unlaunch", out)       # nothing to undo
 
+    def test_launch_failure_message_is_gentle(self):
+        # When no terminal can be opened (e.g. plain Linux without tmux), the message is
+        # honest and polite, pointing to the user's own terminal (never curt).
+        import io, contextlib
+        orig = _engine.launch_in_terminal
+        _engine.launch_in_terminal = lambda c: None   # simulate "couldn't open"
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf):
+                _engine.main(["--launch", "vi"])
+        finally:
+            _engine.launch_in_terminal = orig
+        out = buf.getvalue()
+        self.assertIn("couldn't open", out)
+        self.assertIn("Please run it in your own terminal", out)
+
 
 class TestFirstRunHint(Base):
     def test_fires_once_then_silent(self):
