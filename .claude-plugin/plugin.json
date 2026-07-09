@@ -1,7 +1,7 @@
 {
   "name": "sethu",
   "displayName": "sethu: command bridge",
-  "version": "0.11.7",
+  "version": "0.12.0",
   "description": "Run terminal commands right in the Claude Code prompt box and see the output yourself for free (it never enters the model's context). Share it with Claude only when you want it acted on. Gated by default: safe inspection tools work out of the box.",
   "author": {
     "name": "namrataashettar"
