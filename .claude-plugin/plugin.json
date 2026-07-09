@@ -1,13 +1,20 @@
 {
   "name": "sethu",
   "displayName": "sethu: command bridge",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "description": "Run terminal commands right in the Claude Code prompt box and see the output yourself for free (it never enters the model's context). Share it with Claude only when you want it acted on. Gated by default: safe inspection tools work out of the box.",
   "author": {
     "name": "namrataashettar"
   },
   "homepage": "https://github.com/NamrataAShettar/claude-sethu",
   "repository": "https://github.com/NamrataAShettar/claude-sethu",
-  "keywords": ["hook", "command", "runner", "terminal", "bridge", "tokens"],
+  "keywords": [
+    "hook",
+    "command",
+    "runner",
+    "terminal",
+    "bridge",
+    "tokens"
+  ],
   "license": "MIT"
 }
