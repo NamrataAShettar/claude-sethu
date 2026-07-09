@@ -14,11 +14,11 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
   commands as a subprocess; `_block` emits the zero-token `decision:block`.
 - **`hooks/_engine.py`** — the core, in banner sections:
   - *config* — `DEFAULTS`, `load_config` (type + value coercion, whitespace-canonicalizes
-    allow/launch), `save_config` (atomic via `_atomic_write`: temp+fsync+os.replace, so a
+    allow), `save_config` (atomic via `_atomic_write`: temp+fsync+os.replace, so a
     crash can't torn/truncate it — `set_cwd` uses it too), `_config_lock` (fcntl.flock
     serializing the CLI's read-modify-write so concurrent writers don't lose updates),
     `config_path`.
-  - *allow / launch matching* — `_matches` (exact/prefix), `_is_chain_unsafe` /
+  - *allow matching* — `_matches` (exact/prefix), `_is_chain_unsafe` /
     `_has_unquoted_ops` / `_SUBST_META` (the injection-hardened chain guard).
   - *per-session cwd (cwd mode)* — `is_cd`, `resolve_cd`, `set_cwd`/`get_cwd` (atomic).
   - *command execution* — gated decision (`is_gated`, `GATED` (flag-safe tool set,
