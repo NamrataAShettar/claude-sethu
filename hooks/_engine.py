@@ -1466,6 +1466,10 @@ def _apply_cli_mutations(a, cfg):
             print(f"can't use {a.prefix!r}: Claude Code reserves a leading {a.prefix[0]!r} "
                   f"for {reserved}, so sethu never sees it. Pick another prefix (default '>').")
             noop = True
+        elif len(a.prefix) != 1:
+            print("the prefix must be a single character (default '>'): sethu doubles it "
+                  "for sharing (like `>>`), which only reads cleanly with one char.")
+            noop = True
         else:
             cfg["prefix"] = a.prefix
             print(f"✔ prefix: {a.prefix!r}")

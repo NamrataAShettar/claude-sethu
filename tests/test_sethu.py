@@ -380,7 +380,7 @@ class TestManagementCLI(Base):
                   "Gated by default"]:
             self.assertIn(t, out, t)
 
-    def test_prefix_reserved_chars_refused(self):
+    def test_prefix_reserved_or_multichar_refused(self):
         # `!` (shell/bang mode), `/` (slash commands), and `@` (file mentions) are reserved
         # by Claude Code's UI and never reach sethu's hook, so a prefix starting with any of
         # them would never trigger. Refuse instead of silently storing a dead prefix.
@@ -388,7 +388,13 @@ class TestManagementCLI(Base):
             out = self._out(["--prefix", p])
             self.assertIn("reserves", out, p)
             self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
-        self._out(["--prefix", "»"])                                 # a normal one works
+        # A multi-char prefix is refused too: sethu doubles it for share (`>>`), which only
+        # reads cleanly as a single char.
+        for p in (">>", "::", "sh"):
+            out = self._out(["--prefix", p])
+            self.assertIn("single character", out, p)
+            self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
+        self._out(["--prefix", "»"])                                 # a single char works
         self.assertEqual(_engine.load_config()["prefix"], "»")
 
     def test_runner_and_show_print_config(self):
