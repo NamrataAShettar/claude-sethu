@@ -1497,7 +1497,7 @@ def _announce_launch(val):
               f"it does NOT share sethu's allowlist / mode / cwd.")
     else:
         print(f"sethu couldn't open a terminal for {val!r} here (auto-open works on macOS "
-              f"or inside tmux). You can run it in your own terminal.")
+              f"or inside tmux). Please run it in your own terminal.")
 
 
 def main(argv=None):
