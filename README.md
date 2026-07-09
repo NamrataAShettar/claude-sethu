@@ -163,7 +163,7 @@ Config lives in `~/.claude/sethu.json`. The full `sethu` menu has a few more kno
 
 When a command isn't gated, the refusal tells you *why* and hands you the ways forward:
 
-![sethu refusing "> rm foo" because rm can change files, listing options: allow the tool, open in a terminal, trust everything, or see what's gated](assets/sethu_refusal.png)
+![sethu refusing "> rm foo" because rm can change files, listing options: allow the tool, open in a terminal, or trust everything](assets/sethu_refusal.png)
 
 - **Gated by default.** Tools that can't write files or run other programs, whatever
   the flags (`ls`, `cat`, `grep`, `jq`, …), run automatically. Anything that *can*
