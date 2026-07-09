@@ -386,7 +386,7 @@ class TestManagementCLI(Base):
         # them would never trigger. Refuse instead of silently storing a dead prefix.
         for p in ("!", "/", "@", "!run", "/x", "@f"):
             out = self._out(["--prefix", p])
-            self.assertIn("never trigger", out, p)
+            self.assertIn("reserves", out, p)
             self.assertNotEqual(_engine.load_config()["prefix"], p)  # not stored
         self._out(["--prefix", "»"])                                 # a normal one works
         self.assertEqual(_engine.load_config()["prefix"], "»")

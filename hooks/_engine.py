@@ -1463,9 +1463,8 @@ def _apply_cli_mutations(a, cfg):
     if a.prefix:
         reserved = _RESERVED_PREFIXES.get(a.prefix[0])
         if reserved:
-            print(f"can't set the prefix to {a.prefix!r}: Claude Code reserves a leading "
-                  f"{a.prefix[0]!r} for {reserved} and handles it in the UI before sethu's "
-                  f"hook sees it, so it would never trigger. Pick another prefix (default '>').")
+            print(f"can't use {a.prefix!r}: Claude Code reserves a leading {a.prefix[0]!r} "
+                  f"for {reserved}, so sethu never sees it. Pick another prefix (default '>').")
             noop = True
         else:
             cfg["prefix"] = a.prefix
