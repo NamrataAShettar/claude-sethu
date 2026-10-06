@@ -1,4 +1,5 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "sethu",
   "description": "Run terminal commands right in the Claude Code prompt box: see the output yourself for free, or share it with Claude when you want it acted on.",
   "owner": {
@@ -8,6 +9,13 @@
     {
       "name": "sethu",
       "source": "./",
+      "category": "productivity",
+      "tags": [
+        "terminal",
+        "shell",
+        "command",
+        "tokens"
+      ],
       "description": "Run terminal commands right in the Claude Code prompt box: see the output yourself for free, or share it with Claude when you want it acted on."
     }
   ]
