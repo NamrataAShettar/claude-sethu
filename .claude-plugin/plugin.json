@@ -1,7 +1,7 @@
 {
   "name": "sethu",
   "displayName": "sethu: command bridge",
-  "version": "0.12.1",
+  "version": "0.12.2",
   "description": "Run terminal commands right in the Claude Code prompt box: see the output yourself for free, or share it with Claude when you want it acted on.",
   "author": {
     "name": "namrataashettar"
