@@ -2,7 +2,7 @@
   "name": "sethu",
   "displayName": "sethu: command bridge",
   "version": "0.12.1",
-  "description": "Run terminal commands right in the Claude Code prompt box and see the output yourself for free (it never enters the model's context). Share it with Claude only when you want it acted on. Gated by default: safe inspection tools work out of the box.",
+  "description": "Run terminal commands right in the Claude Code prompt box: see the output yourself for free, or share it with Claude when you want it acted on.",
   "author": {
     "name": "namrataashettar"
   },
@@ -16,5 +16,9 @@
     "bridge",
     "tokens"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "icon": "./assets/sethu-icon-512.png",
+  "documentationUrl": "https://github.com/NamrataAShettar/claude-sethu#readme",
+  "supportUrl": "https://github.com/NamrataAShettar/claude-sethu/issues",
+  "privacyPolicyUrl": "https://github.com/NamrataAShettar/claude-sethu/blob/main/PRIVACY.md"
 }
