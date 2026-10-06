@@ -1,5 +1,5 @@
 {
-  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "$schema": "https://www.schemastore.org/claude-code-marketplace.json",
   "name": "sethu",
   "description": "Run terminal commands right in the Claude Code prompt box: see the output yourself for free, or share it with Claude when you want it acted on.",
   "owner": {

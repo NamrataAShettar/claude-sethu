@@ -66,6 +66,7 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   first-run hint skips if unwritable     TestFirstRunHint                       [x]
   orphaned socket + cwd file swept       TestSweep                              [x]
   bug-bash regression fixes (misc)       TestBugBash2                           [x]
+  manifest copies agree + icon resolves  TestManifestConsistency                [x]
 """
 import json
 import os
@@ -1793,6 +1794,52 @@ class TestPython3Shim(unittest.TestCase):
         r = self._run("session", "session_start.py", env)
         self.assertEqual(r.returncode, 0)
         self.assertIn("sethu is installed", r.stdout)
+
+
+class TestManifestConsistency(unittest.TestCase):
+    """The pitch lives in three manifest copies (plugin.json `description`, and
+    marketplace.json's marketplace-level + plugin-entry `description`) plus the GitHub
+    "About", which no test can reach. design-guidelines.md records that they drifted
+    once (still saying "read-only by default" long after the model became "gated"), so
+    pin the three that ARE reachable rather than trusting prose. Also pins the icon
+    path, because plugin.json names a file under assets/ that nothing else references:
+    rename it and the directory listing silently loses its icon."""
+    @staticmethod
+    def _load(name):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, ".claude-plugin", name)) as fh:
+            return json.load(fh), root
+
+    def test_description_identical_in_all_three_places(self):
+        plugin, _ = self._load("plugin.json")
+        market, _ = self._load("marketplace.json")
+        entry = market["plugins"][0]
+        self.assertEqual(plugin["description"], market["description"])
+        self.assertEqual(plugin["description"], entry["description"])
+        self.assertTrue(plugin["description"].strip(), "description is empty")
+
+    def test_entry_name_matches_manifest_name(self):
+        plugin, _ = self._load("plugin.json")
+        market, _ = self._load("marketplace.json")
+        self.assertEqual(market["plugins"][0]["name"], plugin["name"])
+
+    def test_icon_path_resolves_to_a_committed_file(self):
+        plugin, root = self._load("plugin.json")
+        icon = plugin["icon"]
+        self.assertTrue(icon.startswith("./"), f"icon path needs a ./ prefix: {icon}")
+        self.assertNotIn("..", icon, "icon path must stay inside the plugin root")
+        self.assertTrue(os.path.isfile(os.path.join(root, icon[2:])),
+                        f"plugin.json icon points at a missing file: {icon}")
+
+    def test_listing_fields_live_only_in_plugin_json(self):
+        # The directory reads these from plugin.json; `claude plugin validate` reports
+        # each as an unknown field when it finds one in a marketplace entry.
+        listing = ("icon", "documentationUrl", "supportUrl", "privacyPolicyUrl",
+                   "termsOfServiceUrl")
+        market, _ = self._load("marketplace.json")
+        for scope, obj in (("top level", market), ("entry", market["plugins"][0])):
+            for field in listing:
+                self.assertNotIn(field, obj, f"{field} belongs in plugin.json, not the {scope}")
 
 
 class TestCoverageEnforcement(unittest.TestCase):

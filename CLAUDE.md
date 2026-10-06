@@ -54,7 +54,14 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
 - **`hooks/run.sh`** — POSIX-sh launcher: exec `python3`, or degrade gracefully when it's
   missing (the tolerant no-python3 block shim).
 - **`hooks/hooks.json`** — hook registration. **`.claude-plugin/`** — `plugin.json`
-  (version lives here), `marketplace.json`.
+  (version lives here, plus the directory-listing fields: `icon`, `documentationUrl`,
+  `supportUrl`, `privacyPolicyUrl` — set ONLY here, a marketplace entry rejects them),
+  `marketplace.json` (`category`/`tags` live on the entry, not in `plugin.json`).
+- **`assets/`** — `sethu-icon.svg` (the wide inline badge the README embeds),
+  `sethu-icon-512.png` (**referenced by `plugin.json`'s `icon`** — renaming or deleting it
+  breaks the directory listing), its source `sethu-icon-square.svg`, and the README
+  screenshots. `TestManifestConsistency` pins the icon path and the three description
+  copies.
 - **`tests/test_sethu.py`** — the whole suite + the coverage table and
   `TestCoverageEnforcement` (top of file). **`docs/`** — design-guidelines, testing,
   use-cases.

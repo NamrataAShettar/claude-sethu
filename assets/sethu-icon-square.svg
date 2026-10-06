@@ -1,4 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>sethu (square)</title>
+  <!-- Source for assets/sethu-icon-512.png, the icon plugin.json points at for the
+       Anthropic directory listing. That listing wants a square SVG or 512x512 PNG, and
+       sethu-icon.svg (the inline README badge) is 108x30, so it can't serve both roles.
+       Same |^=^| mark, same terminal teal (xterm-256 color 37, _engine.py's ICON color),
+       on an opaque dark ground because the listing accepts JPEG and a transparent icon
+       would inherit whatever the gallery card paints behind it.
+
+       Regenerate the PNG after editing this file:
+         rsvg-convert -w 512 -h 512 assets/sethu-icon-square.svg -o assets/sethu-icon-512.png
+       The glyph is <text> in a system monospace font, so render it on a host that HAS
+       one of the fonts below. A substituted font silently changes the shape. -->
   <rect width="1024" height="1024" fill="#0d1b1e"/>
   <text x="512" y="484" text-anchor="middle" dominant-baseline="central"
         font-family="Menlo, DejaVu Sans Mono, Liberation Mono, monospace"
