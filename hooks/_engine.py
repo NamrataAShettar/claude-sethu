@@ -56,9 +56,20 @@ MAX_LINES = 40   # default output lines shown before truncation (0 = unlimited)
 # rather than just bumping the number.
 MAX_CAPTURE_BYTES = 8 * 1024 * 1024   # 8 MiB
 
+# auto-quiet: shrink the output of verbose-on-SUCCESS commands Claude runs through its
+# OWN Bash tool, before it enters the model's context (fewer tokens, no cooperation from
+# Claude). The default list is dependency-install prefixes only (the safest, purest-noise
+# slice); add build tools with `sethu --autoquiet-add`. Entries are command PREFIXES,
+# matched after basename-normalizing the leading token (so `npm install` matches but
+# `npm run build` does not). See docs/ (auto-quiet) for the behavior matrix.
+AUTOQUIET_DEFAULT_TOOLS = ["npm install", "npm ci", "yarn install", "pnpm install",
+                           "pip install", "poetry install", "bundle install"]
+
 DEFAULTS = {"prefix": ">", "mode": "cwd", "allow": [],
             "trust": False, "rc": False, "color": True, "plain": False,
-            "maxLines": MAX_LINES, "timeout": CMD_TIMEOUT}
+            "maxLines": MAX_LINES, "timeout": CMD_TIMEOUT,
+            "autoquiet": False, "autoquietTools": list(AUTOQUIET_DEFAULT_TOOLS),
+            "autoquietMaxLines": 20}
 # Note: no `readonly` or `launch` key. sethu is "gated" by default (only the GATED tool
 # set + your --allow'd tools run); `trust: True` ungates everything. `--launch` is now a
 # one-shot open (it runs the command in a real terminal now and stores nothing). An old
@@ -250,6 +261,7 @@ def _sweep_temp(now, force=False):
     for e in entries:
         n = e.name
         if not ((n.startswith("sethu-out-") and n.endswith(".log")) or
+                (n.startswith("sethu-aq-") and n.endswith(".log")) or  # auto-quiet full-output files
                 (n.startswith("sethu-launch-") and n.endswith(".command")) or
                 (n.startswith("sethu-") and n.endswith(".sock")) or
                 (n.startswith("sethu-") and n.endswith(".sock.lock")) or
@@ -276,6 +288,175 @@ def _sweep_temp(now, force=False):
                         pass
         except OSError:
             pass
+
+
+# ── auto-quiet filter (shrink Claude's own verbose command output) ─────────────
+# Pure text transform used by the PostToolUse hook. Keeps the TAIL (where a build/
+# install summary lives) plus any error/warning lines, strips ANSI, collapses `\r`
+# progress redraws, truncates a pathological single long line, and decides to act on
+# BYTE reduction (not just line count) so a `\r`-spinner or one-giant-line blob is caught
+# too. Returns (body, note) when it MEANINGFULLY shrinks, else None (the caller passes the
+# ORIGINAL through unchanged — fail-open). No I/O: the hook owns the full-output file and
+# the breadcrumb path. Distinct from `_truncate` (that keeps the HEAD for the `>` lane).
+_AQ_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_AQ_ERRORISH = re.compile(r"\b(error|fail(ed|ure)?|exception|traceback|fatal|warn(ing)?)\b",
+                          re.IGNORECASE)
+_AQ_MIN_SAVE_BYTES = 512     # don't bother shrinking if it saves less than this
+_AQ_MAX_LINE_BYTES = 2000    # truncate a single line longer than this (bytes)
+_AQ_MAX_FLAGGED = 5          # cap error/warning lines carried up from the hidden region
+
+
+def autoquiet_filter(text, maxlines):
+    """Shrink successful-command output. Return (body, note) if it meaningfully shrinks,
+    else None. Deterministic and pure (no I/O). `note` is a short human summary the hook
+    folds into the breadcrumb, e.g. 'trimmed 312 lines, kept last 20 + 2 error line(s)'."""
+    if not text or not text.strip():
+        return None
+    orig_bytes = len(text.encode("utf-8", "replace"))
+    # 1) clean: strip ANSI, collapse each line's `\r` redraws to the final segment,
+    #    drop trailing blank lines. rstrip the trailing `\r` FIRST so a normal CRLF line
+    #    (`foo\r\n`) is not blanked to "" by the split — that would silently drop content,
+    #    including error/warning lines we promise to keep (a `\r`-spinner still collapses:
+    #    `50%\r75%\r` -> `75%`).
+    rows = [seg.rstrip("\r").split("\r")[-1]
+            for seg in _AQ_ANSI.sub("", text).split("\n")]
+    while rows and rows[-1].strip() == "":
+        rows.pop()
+    if not rows:
+        return None
+    # 2) truncate a pathological single long line (bytes), so "few lines" can't hide MiBs.
+    long_line = False
+    for i, ln in enumerate(rows):
+        b = ln.encode("utf-8", "replace")
+        if len(b) > _AQ_MAX_LINE_BYTES:
+            rows[i] = (b[:_AQ_MAX_LINE_BYTES].decode("utf-8", "ignore")
+                       + f" … [{len(b) - _AQ_MAX_LINE_BYTES} bytes truncated]")
+            long_line = True
+    total = len(rows)
+    # 3) build the candidate shrunk body.
+    if total > maxlines:
+        tail = rows[total - maxlines:]
+        hidden = rows[:total - maxlines]
+        flagged = [ln for ln in hidden if _AQ_ERRORISH.search(ln)][-_AQ_MAX_FLAGGED:]
+        parts = []
+        if flagged:
+            parts.append("… error/warning lines from above:")
+            parts.extend(flagged)
+            parts.append("…")
+        parts.extend(tail)
+        body = "\n".join(parts)
+        note = f"trimmed {total} lines, kept last {len(tail)}"
+        if flagged:
+            note += f" + {len(flagged)} error/warning line(s)"
+    else:
+        body = "\n".join(rows)
+        note = "truncated a long line" if long_line else "cleaned progress/ANSI noise"
+    # 4) act only if it meaningfully reduces bytes — else leave the ORIGINAL untouched.
+    if (orig_bytes - len(body.encode("utf-8", "replace"))) < _AQ_MIN_SAVE_BYTES:
+        return None
+    return body, note
+
+
+# Inspection subcommands of multi-purpose tools: their output IS the information Claude
+# asked for (bucket 1), so NEVER shrink them even if the program is allowlisted (defends
+# a user who adds a bare program like "npm"/"pip" to the list). See auto-quiet §12.1 #3.
+_AQ_INSPECT_DENY = {"list", "ls", "freeze", "show", "view", "config", "env",
+                    "doc", "tree", "metadata", "version", "outdated", "info"}
+_AQ_VERBOSE_FLAG = re.compile(r"(?:^|\s)(?:-v+|--verbose)(?:[=\s]|$)")
+
+
+def _autoquiet_eligible(cmd, tools):
+    """Is this Bash command eligible for auto-quiet? Conservative, fail-safe: Bash is
+    assumed (the hook matcher), success is assumed (the platform only fires PostToolUse on
+    exit 0). Here we gate on: no chain/pipe/redirect/subst, not an inspection subcommand,
+    no explicit -v/--verbose (Claude wants it all then), and a prefix match of the
+    allowlist after basename-normalizing the leading token."""
+    parts = cmd.strip().split()
+    if not parts:
+        return False
+    # The subcommand is the first NON-FLAG token after the program, so an inspection
+    # subcommand is denied even behind flags (`pip --quiet freeze`, `npm --loglevel=warn ls`).
+    sub = next((t for t in parts[1:] if not t.startswith("-")), None)
+    if sub in _AQ_INSPECT_DENY:
+        return False
+    if _AQ_VERBOSE_FLAG.search(cmd):
+        return False
+    # basename-normalize the leading token so `/usr/bin/npm install` matches `npm install`;
+    # `_matches` applies the chain guard and does exact/prefix matching.
+    normalized = " ".join([os.path.basename(parts[0])] + parts[1:])
+    return _matches(normalized, tools)
+
+
+def _autoquiet_out_path(tuid):
+    """Per-TOOL-CALL file holding a shrunk command's full captured output — the SOLE
+    recovery copy, since `updatedToolOutput` replaces the transcript. Keyed by tool_use_id
+    (NOT per session) so a later command can't overwrite an earlier one's recovery file.
+    Distinct `sethu-aq-` prefix (the `>` lane uses `sethu-out-`). Swept by `_sweep_temp`."""
+    return os.path.join(tempfile.gettempdir(), f"sethu-aq-{_sid_hash(tuid)}.log")
+
+
+def _autoquiet_write_full(path, cmd, stdout, stderr):
+    """Write the captured full output to `path`. Return True on success, else False so the
+    caller FAILS OPEN (never shrink without a recoverable copy). O_NOFOLLOW: predictable
+    name in a shared tmp dir, so refuse to follow a planted symlink."""
+    body = f"$ {cmd}\n\n--- stdout ---\n{stdout}\n--- stderr ---\n{stderr}\n"
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(body)
+        return True
+    except Exception:
+        return False
+
+
+def _autoquiet_breadcrumb(filt, path):
+    """Prepend the plain-text, transcript-visible breadcrumb to a shrunk stream. No icon /
+    ANSI (it is read by Claude and shown in the tool result, not a human-styled line)."""
+    body, note = filt
+    return f"[sethu auto-quiet] {note} (captured output: {path})\n{body}"
+
+
+def autoquiet_process(ev):
+    """Core auto-quiet entry. Given a PostToolUse event dict (Bash, success), return the
+    `hookSpecificOutput` dict that shrinks the output, or None to pass through unchanged.
+    FAIL-OPEN: any uncertainty (config off, ineligible, binary, no recoverable copy, parse
+    error) returns None and the ORIGINAL output stands."""
+    try:
+        cfg = load_config()
+        if not cfg.get("autoquiet"):
+            return None
+        cmd = (ev.get("tool_input") or {}).get("command")
+        if not isinstance(cmd, str) or not cmd.strip():
+            return None
+        if not _autoquiet_eligible(cmd, cfg["autoquietTools"]):
+            return None
+        tr = ev.get("tool_response")
+        # Pass through an image result, or a partial/interrupted one (§11 T3) — interrupted
+        # output is signal Claude needs, not noise to shrink.
+        if not isinstance(tr, dict) or tr.get("isImage") or tr.get("interrupted"):
+            return None
+        stdout = tr.get("stdout") if isinstance(tr.get("stdout"), str) else ""
+        stderr = tr.get("stderr") if isinstance(tr.get("stderr"), str) else ""
+        ml = cfg["autoquietMaxLines"]
+        fo = autoquiet_filter(stdout, ml)
+        fe = autoquiet_filter(stderr, ml)
+        if not fo and not fe:
+            return None  # nothing to gain
+        path = _autoquiet_out_path(ev.get("tool_use_id") or "default")
+        if not _autoquiet_write_full(path, cmd, stdout, stderr):
+            return None  # never shrink without a recoverable full copy
+        _sweep_temp(time.time())  # opportunistic GC, same as the `>` lane
+        return {"hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "updatedToolOutput": {
+                "stdout": _autoquiet_breadcrumb(fo, path) if fo else stdout,
+                "stderr": _autoquiet_breadcrumb(fe, path) if fe else stderr,
+                "interrupted": bool(tr.get("interrupted", False)),
+                "isImage": bool(tr.get("isImage", False)),
+                "noOutputExpected": bool(tr.get("noOutputExpected", False)),
+            }}}
+    except Exception:
+        return None  # fail-open
 
 
 def _truncate(out, sid, cap, on, plain=False):
@@ -401,6 +582,13 @@ def load_config():
         cfg["mode"] = DEFAULTS["mode"]
     if not cfg["prefix"]:
         cfg["prefix"] = DEFAULTS["prefix"]
+    # auto-quiet: same whitespace-canonicalization as `allow` (entries are command
+    # prefixes), and a lower bound on the kept-lines count (0/negative is nonsensical
+    # and would hide everything) — both so a hand-edited config can't misbehave.
+    cfg["autoquietTools"] = [c for c in (" ".join(str(x).split())
+                                         for x in cfg["autoquietTools"]) if c]
+    if cfg["autoquietMaxLines"] < 1:
+        cfg["autoquietMaxLines"] = DEFAULTS["autoquietMaxLines"]
     return cfg
 
 
@@ -1320,6 +1508,10 @@ How commands run:
   sethu --color off        uncolored result header (or NO_COLOR=1)
   sethu --plain on         `sethu:` prefix + words, no glyphs (screen readers)
 
+Save tokens on Claude's OWN commands (not your `>` commands):
+  sethu --autoquiet on     auto-shrink verbose build/install output before it enters context
+  sethu --autoquiet-add "webpack"   also shrink another command prefix (--autoquiet-remove to undo)
+
   sethu --runner           show the full config with defaults
 
 Gated by default: a curated set of safe tools runs free; everything else needs
@@ -1329,7 +1521,7 @@ Config: {config_path()}   now: mode={cfg['mode']}, trust={'on' if cfg.get('trust
 
 SUBCOMMANDS = {"mode", "allow", "unallow", "launch",
                "trust", "rc", "color", "plain", "maxlines", "timeout", "prefix",
-               "restart", "runner", "show", "help"}
+               "restart", "runner", "show", "help", "autoquiet"}
 
 
 def normalize_argv(argv):
@@ -1501,6 +1693,40 @@ def _apply_cli_mutations(a, cfg):
                  if cfg["rc"] else "")
         print(f"✔ rc: {a.rc}{note}{extra}")
         changed = True
+    if a.autoquiet:
+        cfg["autoquiet"] = (a.autoquiet == "on")
+        if cfg["autoquiet"]:
+            print("✔ autoquiet: on. sethu will shrink the output of the auto-quiet commands "
+                  "(see --autoquiet-add) that Claude runs itself, before it reaches Claude's "
+                  "context, to save tokens. Only SUCCESSFUL commands are shrunk, the tail and "
+                  "error lines are kept, and a note points to the full output. `sethu --runner` "
+                  "shows what it's doing. `--autoquiet off` to stop.")
+        else:
+            print("✔ autoquiet: off (Claude's own command output enters context untouched).")
+        changed = True
+    if a.autoquiet_add is not None:
+        val = " ".join(a.autoquiet_add.split())
+        if not val:
+            print("nothing to add (the command was empty)."); noop = True
+        elif val in cfg["autoquietTools"]:
+            print(f"already auto-quieted: {val!r} (no change)."); noop = True
+        else:
+            cfg["autoquietTools"].append(val)
+            print(f"✔ auto-quiet will now shrink commands starting with {val!r}")
+            changed = True
+    if a.autoquiet_remove is not None:
+        val = " ".join(a.autoquiet_remove.split())
+        if not val:
+            print("nothing to remove (the command was empty)."); noop = True
+        elif val in cfg["autoquietTools"]:
+            cfg["autoquietTools"].remove(val)
+            print(f"✔ auto-quiet will no longer shrink {val!r}"); changed = True
+        else:
+            print(f"not in the auto-quiet list: {val!r} (nothing removed)."); noop = True
+    if a.autoquiet_maxlines is not None:
+        cfg["autoquietMaxLines"] = max(1, a.autoquiet_maxlines)
+        print(f"✔ autoquietMaxLines: {cfg['autoquietMaxLines']} (lines kept when shrinking)")
+        changed = True
     return changed, noop, launch_val
 
 
@@ -1549,6 +1775,15 @@ def main(argv=None):
                    help="seconds a command may run before it's timed out (default 20)")
     p.add_argument("--restart", action="store_true",
                    help="restart the persistent shell(s) (clears shell-mode state)")
+    p.add_argument("--autoquiet", choices=["on", "off"],
+                   help="auto-shrink verbose output of Claude's OWN build/install commands "
+                        "before it enters context, to save tokens (off by default)")
+    p.add_argument("--autoquiet-add", metavar="CMD", dest="autoquiet_add",
+                   help="add a command prefix to auto-quiet (e.g. \"webpack\", \"npm run build\")")
+    p.add_argument("--autoquiet-remove", metavar="CMD", dest="autoquiet_remove",
+                   help="remove a command prefix from auto-quiet")
+    p.add_argument("--autoquiet-maxlines", metavar="N", type=int, dest="autoquiet_maxlines",
+                   help="auto-quiet: keep the last N lines of a shrunk command (default 20)")
     p.add_argument("--runner", "--show", dest="show", action="store_true", help="show config")
     a = p.parse_args(args_list)
 
@@ -1594,6 +1829,11 @@ def _print_config(cfg):
     print(f"  maxLines: {'unlimited' if ml == 0 else ml}   (default 40; truncate long output, full saved to a file)")
     print(f"  timeout:  {cmd_timeout(cfg)}s   (default 20s; max seconds a command may run)")
     print(f"  allow:    {cfg['allow']}   (gated tools + these run; `--gated-list` to see all)")
+    aq = "on" if cfg.get("autoquiet") else "off"
+    print(f"  autoquiet: {aq}   (default off; shrink Claude's OWN verbose build/install output to save tokens)")
+    if cfg.get("autoquiet"):
+        print(f"    shrinks:  {cfg['autoquietTools']}   (command prefixes; --autoquiet-add / --autoquiet-remove)")
+        print(f"    keeps:    last {cfg['autoquietMaxLines']} lines + error lines (--autoquiet-maxlines)")
 
 
 if __name__ == "__main__":

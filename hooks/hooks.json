@@ -29,6 +29,22 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/run.sh",
+              "posttool",
+              "${CLAUDE_PLUGIN_ROOT}/hooks/autoquiet_hook.py"
+            ]
+          }
+        ]
+      }
     ]
   }
 }

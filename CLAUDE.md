@@ -46,14 +46,27 @@ is banner-commented — `# ── <section> ──` — grep those to jump.)
     `_apply_cli_mutations` (the per-flag config mutations, run under the lock;
     `_announce_launch` opens a terminal AFTER the lock), `normalize_argv`
     (subcommand→flag aliasing), `_Parser` (branded errors), `help_text`, `_print_config`.
+  - *auto-quiet (shrink Claude's OWN command output)* — `autoquiet_process` (the
+    `PostToolUse` entry: returns the shrinking `updatedToolOutput`, or None to pass through
+    — fail-open), `autoquiet_filter` (deterministic shrink: strip ANSI, collapse `\r`,
+    byte-based decision, keep tail + error/warn lines, truncate a long line),
+    `_autoquiet_eligible` (allowlist prefix-match + inspection-subcommand denylist + chain
+    guard + skip `-v`), `_autoquiet_out_path`/`_autoquiet_write_full`/`_autoquiet_breadcrumb`
+    (the per-tool-call recovery file + the transcript-visible `[sethu auto-quiet]`
+    breadcrumb). Config keys `autoquiet`/`autoquietTools`/`autoquietMaxLines`; CLI
+    `--autoquiet on|off` / `--autoquiet-add|-remove` / `--autoquiet-maxlines`.
 - **`hooks/_shelld.py`** — the persistent-shell daemon (PTY + unix-socket server) that
   backs shell mode; wire protocol version `_PROTO`. On a command timeout it verifies the
   shell recovered (`_probe`/`_recover`: Ctrl-C → SIGKILL the foreground pgrp → respawn on
   a wedge, H3) and byte-caps output (`MAX_OUTPUT`, ST7).
 - **`hooks/session_start.py`** — SessionStart hook (first-run welcome).
+- **`hooks/autoquiet_hook.py`** — the `PostToolUse` (matcher `Bash`) hook for auto-quiet.
+  Cheap fast-path gate (json/os only, NO `_engine` import when autoquiet is off or the tool
+  isn't Bash); when on + Bash, delegates to `_engine.autoquiet_process`. Fail-open.
 - **`hooks/run.sh`** — POSIX-sh launcher: exec `python3`, or degrade gracefully when it's
-  missing (the tolerant no-python3 block shim).
-- **`hooks/hooks.json`** — hook registration. **`.claude-plugin/`** — `plugin.json`
+  missing (the tolerant no-python3 block shim; a non-`prompt`/non-`session` role such as the
+  auto-quiet `posttool` hook degrades to a silent pass-through).
+- **`hooks/hooks.json`** — hook registration (UserPromptSubmit + SessionStart + PostToolUse:Bash for auto-quiet). **`.claude-plugin/`** — `plugin.json`
   (version lives here), `marketplace.json`.
 - **`tests/test_sethu.py`** — the whole suite + the coverage table and
   `TestCoverageEnforcement` (top of file). **`docs/`** — design-guidelines, testing,
@@ -91,6 +104,17 @@ from the code. A stale map is worse than none.
   `INTERACTIVE` list refuses known ones, the alt-screen escape catches unknown ones.
   Run `claude --plugin-dir` etc. in a real shell, **not** via `>`.
 - **`!` bang mode always costs tokens**; `>` is the free path.
+- **auto-quiet (opt-in, off by default)** shrinks the output of Claude's OWN
+  verbose-on-SUCCESS Bash commands (installs/builds on `autoquietTools`) before it enters
+  context, via `PostToolUse` + `updatedToolOutput`. Only SUCCESSFUL commands (PostToolUse
+  does NOT fire on a failing Bash command — verified), only when it saves bytes; keeps the
+  tail + error/warn lines + a `[sethu auto-quiet]` breadcrumb pointing to the captured output on
+  disk (the per-tool-call `sethu-aq-*.log`, the SOLE copy since `updatedToolOutput` replaces
+  the transcript). **Fail-open**: any uncertainty passes the ORIGINAL through. It is a
+  SETTINGS hook, NOT a mod — no practical version floor (`updatedToolOutput` verified working
+  back to 2.1.234). The user didn't type these commands, so the breadcrumb + `--runner`
+  status are the auditability surface. Inspection subcommands (`pip freeze`, `npm ls`…) are
+  never shrunk even if the program is allowlisted.
 - **Test a branch live:** [`docs/testing.md`](docs/testing.md) (nothing auto-updates;
   use `/reload-plugins`).
 

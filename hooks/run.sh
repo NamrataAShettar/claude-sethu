@@ -30,6 +30,12 @@ if [ "$role" = "session" ]; then
     exit 0
 fi
 
+if [ "$role" != "prompt" ]; then
+    # Any other role (e.g. the PostToolUse auto-quiet hook): python3 is missing, so there
+    # is nothing to do — stay silent and let the original tool output pass through.
+    exit 0
+fi
+
 # Prompt role: only speak up if this looks like a sethu command, so normal typing
 # stays silent. Parse with builtins only (no python3/grep), tolerating the JSON
 # formatting variations Claude Code may use — pretty-printed / multi-line, and

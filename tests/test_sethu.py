@@ -29,6 +29,10 @@ feature or argument, add a row here, write its test, and tick it. Keep in sync.
   --plain on/off (spoken/screen-reader)  TestPlainMode                          [x]
   --maxlines (truncation)                TestTruncate, TestConfig               [x]
   --timeout                              TestTimeout, TestConfig                [x]
+  --autoquiet on/off/add/remove/maxlines TestAutoQuietConfig                    [x]
+  auto-quiet filter (shrink algorithm)   TestAutoQuietFilter                    [x]
+  auto-quiet hook (gate/shrink/recover)  TestAutoQuietProcess                   [x]
+  auto-quiet live platform probe (opt-in) TestAutoQuietLive (SETHU_LIVE_CC)      [x]
   --prefix (custom trigger + guard)      TestCustomPrefix, TestConfig,          [x]
                                          TestHookGate, TestManagementCLI
   --restart                              TestManagementCLI, TestKillDaemons     [x]
@@ -1793,6 +1797,310 @@ class TestPython3Shim(unittest.TestCase):
         r = self._run("session", "session_start.py", env)
         self.assertEqual(r.returncode, 0)
         self.assertIn("sethu is installed", r.stdout)
+
+
+class TestAutoQuietConfig(Base):
+    """auto-quiet config + CLI (Phase 1: config surface only; filtering lands later).
+    Keys: autoquiet (bool), autoquietTools (command prefixes), autoquietMaxLines (int)."""
+    def _out(self, argv):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _engine.main(argv)
+        return buf.getvalue()
+
+    def test_defaults_off_with_install_prefixes(self):
+        self.write()  # minimal config, no autoquiet keys -> DEFAULTS apply
+        cfg = _engine.load_config()
+        self.assertFalse(cfg["autoquiet"])
+        self.assertEqual(cfg["autoquietTools"], _engine.AUTOQUIET_DEFAULT_TOOLS)
+        self.assertEqual(cfg["autoquietMaxLines"], 20)
+        self.assertIn("npm install", cfg["autoquietTools"])   # installs in default
+        self.assertNotIn("webpack", cfg["autoquietTools"])    # builds are not
+
+    def test_toggle_on_discloses_then_off(self):
+        out = self._out(["--autoquiet", "on"])
+        self.assertTrue(_engine.load_config()["autoquiet"])
+        for t in ("autoquiet: on", "SUCCESSFUL", "--runner", "--autoquiet off"):
+            self.assertIn(t, out, t)   # enable-time disclosure (transparency)
+        out = self._out(["--autoquiet", "off"])
+        self.assertFalse(_engine.load_config()["autoquiet"])
+        self.assertIn("off", out)
+
+    def test_add_remove_truthful(self):
+        self.assertIn("will now shrink", self._out(["--autoquiet-add", "webpack"]))
+        self.assertIn("webpack", _engine.load_config()["autoquietTools"])
+        self.assertIn("already auto-quieted", self._out(["--autoquiet-add", "webpack"]))
+        self.assertIn("will no longer shrink", self._out(["--autoquiet-remove", "webpack"]))
+        self.assertNotIn("webpack", _engine.load_config()["autoquietTools"])
+        self.assertIn("not in the auto-quiet list",
+                      self._out(["--autoquiet-remove", "webpack"]))
+
+    def test_maxlines_clamped_to_at_least_one(self):
+        self._out(["--autoquiet-maxlines", "5"])
+        self.assertEqual(_engine.load_config()["autoquietMaxLines"], 5)
+        for bad in ("0", "-3"):
+            self._out(["--autoquiet-maxlines", bad])
+            self.assertEqual(_engine.load_config()["autoquietMaxLines"], 1)  # max(1, n)
+
+    def test_runner_shows_autoquiet_status(self):
+        self.assertIn("autoquiet:", self._out(["--runner"]))   # shown even when off
+        self._out(["--autoquiet", "on"])
+        out = self._out(["--runner"])
+        self.assertIn("shrinks:", out)   # the tools list surfaces when on
+        self.assertIn("keeps:", out)
+
+    def test_load_config_normalizes_bad_values(self):
+        # non-list tools -> default list; sub-1 maxlines -> default.
+        self.write(autoquietTools="notalist", autoquietMaxLines=0)
+        cfg = _engine.load_config()
+        self.assertEqual(cfg["autoquietTools"], _engine.AUTOQUIET_DEFAULT_TOOLS)
+        self.assertEqual(cfg["autoquietMaxLines"], 20)
+        # odd spacing / non-string entries canonicalized, empties dropped.
+        self.write(autoquietTools=["  npm   install ", "", 5], autoquietMaxLines=3)
+        cfg = _engine.load_config()
+        self.assertEqual(cfg["autoquietTools"], ["npm install", "5"])
+        self.assertEqual(cfg["autoquietMaxLines"], 3)
+
+    def test_subcommand_alias(self):
+        self._out(["autoquiet", "on"])   # subcommand style == `--autoquiet on`
+        self.assertTrue(_engine.load_config()["autoquiet"])
+
+
+class TestAutoQuietFilter(unittest.TestCase):
+    r"""The deterministic auto-quiet shrink filter (pure, no I/O). Pins the §11 matrix
+    rows that are filter-level: shrink vs passthrough, tail + error retention, ANSI / \r
+    cleaning, long-line truncation, byte-based decision, determinism."""
+    F = staticmethod(_engine.autoquiet_filter)
+
+    def test_empty_or_blank_is_passthrough(self):
+        self.assertIsNone(self.F("", 20))
+        self.assertIsNone(self.F("   \n  \n", 20))
+
+    def test_small_clean_output_passthrough(self):
+        self.assertIsNone(self.F("line1\nline2\nline3\n", 20))
+
+    def test_large_output_keeps_tail(self):
+        text = "\n".join(f"progress line number {i:04d} doing stuff" for i in range(200))
+        res = self.F(text, 20)
+        self.assertIsNotNone(res)
+        body, note = res
+        self.assertEqual(len(body.splitlines()), 20)           # exactly the tail
+        self.assertIn("progress line number 0199", body)       # last line kept
+        self.assertNotIn("progress line number 0000", body)    # early line dropped
+        self.assertIn("trimmed 200 lines", note)
+        self.assertIn("kept last 20", note)
+
+    def test_buried_error_line_is_surfaced(self):
+        lines = [f"ok line {i}" for i in range(200)]
+        lines[5] = "FATAL: the important error you must not lose"
+        body, note = self.F("\n".join(lines), 20)
+        self.assertIn("FATAL: the important error", body)      # surfaced from hidden region
+        self.assertIn("error/warning line", note)
+
+    def test_error_lines_capped(self):
+        body, note = self.F("\n".join(f"error number {i}" for i in range(100)), 20)
+        self.assertIn("5 error/warning line", note)            # capped at _AQ_MAX_FLAGGED
+
+    def test_ansi_stripped(self):
+        line = "\x1b[31m" + "x" * 50 + "\x1b[0m"
+        text = "\n".join([line] * 8) + "\n" + ("\x1b[1;32mnoise\x1b[0m " * 60)
+        body, _ = self.F(text, 20)
+        self.assertNotIn("\x1b[", body)                        # no escape codes left
+
+    def test_carriage_return_spinner_collapsed(self):
+        spinner = "".join(f"downloading {i}%\r" for i in range(5000)) + "done"
+        body, _ = self.F(spinner + "\n", 20)                   # huge bytes -> shrinks
+        self.assertIn("done", body)
+        self.assertLess(len(body), 200)                        # collapsed to final segment
+
+    def test_long_single_line_truncated(self):
+        body, note = self.F("x" * 5000 + "\n", 20)
+        self.assertIn("bytes truncated", body)
+
+    def test_crlf_lines_not_blanked(self):
+        # a CRLF-terminated error line in the kept tail must survive the \r collapse
+        # (regression: `"x\r".split("\r")[-1]` == "" blanked CRLF content).
+        lines = [f"step {i:03d}\r" for i in range(200)]
+        lines[195] = "ERROR: migration failed\r"   # within the last-20 tail window
+        body, _ = self.F("\n".join(lines), 20)
+        self.assertIn("ERROR: migration failed", body)   # not blanked to ""
+        self.assertNotIn("\r", body)
+        self.assertIn("step 199", body)                  # still shrinks + keeps the tail
+
+    def test_deterministic(self):
+        text = "\n".join(f"line {i}" for i in range(300))
+        self.assertEqual(self.F(text, 20), self.F(text, 20))
+
+
+class TestAutoQuietProcess(Base):
+    """The PostToolUse entry (_engine.autoquiet_process): gating, shrink vs passthrough,
+    fail-open, the per-tool-call recovery file, the sweep, and the real hook file."""
+    def _ev(self, cmd, stdout="", stderr="", tuid="tc1", **tr):
+        resp = {"stdout": stdout, "stderr": stderr, "interrupted": False,
+                "isImage": False, "noOutputExpected": False}
+        resp.update(tr)
+        return {"tool_name": "Bash", "tool_use_id": tuid,
+                "tool_input": {"command": cmd}, "tool_response": resp}
+
+    def _big(self, n=200):
+        return "\n".join(f"installing package {i:04d} ... done" for i in range(n))
+
+    def test_off_is_passthrough(self):
+        self.write(autoquiet=False)
+        self.assertIsNone(_engine.autoquiet_process(self._ev("npm install", self._big())))
+
+    def test_eligible_large_shrinks_and_keeps_flags(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        out = _engine.autoquiet_process(self._ev("npm install --save", self._big()))
+        self.assertIsNotNone(out)
+        uto = out["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertIn("[sethu auto-quiet]", uto["stdout"])
+        self.assertIn("captured output:", uto["stdout"])
+        self.assertIn("installing package 0199", uto["stdout"])     # tail kept
+        self.assertLess(len(uto["stdout"]), len(self._big()))       # actually smaller
+        self.assertFalse(uto["interrupted"])                        # flags preserved
+        self.assertFalse(uto["isImage"])
+
+    def test_breadcrumb_file_recovers_full_output(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        _engine.autoquiet_process(self._ev("npm install", self._big(), tuid="rec1"))
+        path = _engine._autoquiet_out_path("rec1")
+        self.assertTrue(os.path.exists(path))
+        with open(path) as f:
+            full = f.read()
+        self.assertIn("installing package 0000", full)              # the FULL output is here
+        self.assertIn("installing package 0199", full)
+        self.assertIn("$ npm install", full)
+
+    def test_not_allowlisted_passthrough(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(_engine.autoquiet_process(self._ev("cargo build", self._big())))
+
+    def test_inspection_subcommand_never_shrunk(self):
+        self.write(autoquiet=True, autoquietTools=["pip"])          # bare program on the list
+        self.assertIsNone(_engine.autoquiet_process(self._ev("pip freeze", self._big())))
+        self.assertIsNotNone(                                       # but a real install is fine
+            _engine.autoquiet_process(self._ev("pip install flask", self._big())))
+
+    def test_chained_command_passthrough(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(
+            _engine.autoquiet_process(self._ev("npm install | tail", self._big())))
+
+    def test_verbose_flag_passthrough(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(
+            _engine.autoquiet_process(self._ev("npm install --verbose", self._big())))
+
+    def test_small_output_passthrough(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(_engine.autoquiet_process(self._ev("npm install", "done\n")))
+
+    def test_image_output_passthrough(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(_engine.autoquiet_process(
+            self._ev("npm install", self._big(), isImage=True)))
+
+    def test_missing_tool_response_fail_open(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(_engine.autoquiet_process(
+            {"tool_name": "Bash", "tool_use_id": "x",
+             "tool_input": {"command": "npm install"}}))
+
+    def test_basename_normalized_path_matches(self):      # M2
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        out = _engine.autoquiet_process(
+            self._ev("/usr/local/bin/npm install lodash", self._big()))
+        self.assertIsNotNone(out)   # a vendored/abs-path npm still matches "npm install"
+
+    def test_stderr_only_shrinks_stderr(self):            # O5
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        out = _engine.autoquiet_process(
+            self._ev("npm install", stdout="ok\n", stderr=self._big()))
+        uto = out["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertEqual(uto["stdout"], "ok\n")           # small stdout untouched
+        self.assertIn("[sethu auto-quiet]", uto["stderr"])  # verbose stderr shrunk
+
+    def test_write_failure_is_fail_open(self):            # B2
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        orig = _engine._autoquiet_out_path
+        _engine._autoquiet_out_path = lambda t: "/tmp/sethu_nonexistent_dir_zzz/aq.log"
+        try:  # no recoverable copy can be written -> never shrink, pass original through
+            self.assertIsNone(
+                _engine.autoquiet_process(self._ev("npm install", self._big())))
+        finally:
+            _engine._autoquiet_out_path = orig
+
+    def test_inspection_denied_behind_flags(self):        # review fix #2
+        self.write(autoquiet=True, autoquietTools=["pip", "npm"])
+        for cmd in ("pip --quiet freeze", "pip -q list", "npm --loglevel=warn ls"):
+            self.assertIsNone(_engine.autoquiet_process(self._ev(cmd, self._big())), cmd)
+        self.assertIsNotNone(            # a real install behind flags still shrinks
+            _engine.autoquiet_process(self._ev("pip --quiet install flask", self._big())))
+
+    def test_interrupted_passthrough(self):               # review fix #3 (§11 T3)
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        self.assertIsNone(_engine.autoquiet_process(
+            self._ev("npm install", self._big(), interrupted=True)))
+
+    def test_sweep_covers_autoquiet_file(self):
+        import time
+        path = _engine._autoquiet_out_path("sweepme")
+        with open(path, "w") as f:
+            f.write("old")
+        old = time.time() - _engine._TEMP_MAX_AGE - 1000
+        os.utime(path, (old, old))
+        _engine._sweep_temp(time.time(), force=True)
+        self.assertFalse(os.path.exists(path))
+
+    def test_hook_file_end_to_end(self):
+        self.write(autoquiet=True, autoquietTools=["npm install"])
+        hook = os.path.join(HOOKS, "autoquiet_hook.py")
+        ev = json.dumps(self._ev("npm install", self._big(), tuid="e2e"))
+        env = {**os.environ, "SETHU_CONFIG": self.cfg}
+        r = subprocess.run([sys.executable, hook], input=ev, capture_output=True,
+                           text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        uto = json.loads(r.stdout)["hookSpecificOutput"]["updatedToolOutput"]
+        self.assertIn("[sethu auto-quiet]", uto["stdout"])
+        # off -> the hook emits nothing (original stands)
+        self.write(autoquiet=False)
+        r2 = subprocess.run([sys.executable, hook], input=ev, capture_output=True,
+                            text=True, env=env)
+        self.assertEqual(r2.stdout.strip(), "")
+
+
+@unittest.skipUnless(os.environ.get("SETHU_LIVE_CC"),
+                     "set SETHU_LIVE_CC=/path/to/claude to run the live platform probe")
+class TestAutoQuietLive(unittest.TestCase):
+    """OPT-IN live integration probe against a REAL Claude Code binary — SKIPPED in CI.
+    Verifies the platform contracts the unit suite cannot assert by itself: PostToolUse
+    actually fires on a successful Bash command, `updatedToolOutput` replaces what the model
+    sees, and the `[sethu auto-quiet]` breadcrumb reaches the transcript end-to-end. Run:
+
+        SETHU_LIVE_CC=~/.local/share/claude/versions/2.1.299 \\
+            python3 -m unittest tests.test_sethu.TestAutoQuietLive
+
+    See docs/testing.md (run this before cutting a release, against the current CC)."""
+    def test_live_shrink_end_to_end(self):
+        cc = os.environ["SETHU_LIVE_CC"]
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # the plugin dir
+        tmp = tempfile.mkdtemp()
+        cfg = os.path.join(tmp, "sethu.json")
+        with open(cfg, "w") as f:
+            json.dump({"autoquiet": True, "autoquietTools": ["seq"]}, f)
+        prompt = ("Use the Bash tool to run exactly: seq 300 . Then reply with ONLY the "
+                  "first line of the output you received from the tool.")
+        r = subprocess.run(
+            [cc, "--plugin-dir", root, "--dangerously-skip-permissions",
+             "-p", prompt, "--output-format", "text"],
+            capture_output=True, text=True, timeout=180,
+            env={**os.environ, "SETHU_CONFIG": cfg})
+        self.assertEqual(r.returncode, 0, r.stderr[:2000])
+        self.assertIn("[sethu auto-quiet]", r.stdout,  # the breadcrumb reached the model
+                      f"breadcrumb not seen; model replied: {r.stdout[:500]}")
 
 
 class TestCoverageEnforcement(unittest.TestCase):

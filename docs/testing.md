@@ -12,6 +12,25 @@ Every feature and CLI argument maps to a test (there's a coverage table at the t
 of `tests/test_sethu.py`, guarded by a meta-test that fails if any argument is
 untested). CI runs the suite on every push and PR.
 
+### Platform-contract probe (auto-quiet, opt-in)
+
+A few auto-quiet behaviors depend on Claude Code itself, not sethu's code — that
+PostToolUse fires only on a *successful* Bash command, that `updatedToolOutput`
+replaces what the model sees, and that the `[sethu auto-quiet]` breadcrumb reaches the
+transcript. The unit suite can't assert those (it has no Claude Code), so they live in
+an opt-in integration test that is **skipped unless** you point it at a real binary:
+
+```bash
+SETHU_LIVE_CC=~/.local/share/claude/versions/<ver> \
+    python3 -m unittest tests.test_sethu.TestAutoQuietLive
+```
+
+It runs `seq 300` through a real session (`--plugin-dir` + `-p`) and checks the
+breadcrumb reached the model. It needs a working `claude` login and spends a few
+tokens, so it is NOT in CI. **Run it before cutting a release** (against the current
+CC). Auto-quiet is fail-open, so a platform change turns shrinking OFF rather than
+corrupting output — this probe is how you would notice it stopped firing.
+
 ## Exercise a behavior directly (no Claude Code needed)
 
 The engine is importable, so you can drive `process()` and the CLI without a

@@ -59,6 +59,12 @@ sethu --allow "npm test"   # allow once (it writes / hits the network)
 > pytest -q                > make lint       > tsc --noEmit
 ```
 
+To cut the token cost of the verbose build/install commands **Claude runs itself**,
+turn on auto-quiet once: `sethu --autoquiet on`. It shrinks the output of *successful*
+installs/builds before Claude reads it (the captured output is saved to disk, and a
+`[sethu auto-quiet]` note points at it). Off by default; `sethu --runner` shows what it
+does, `sethu --autoquiet-add "<cmd>"` adds another command (e.g. `webpack`).
+
 ## 5. Environment & system diagnostics
 ```text
 > printenv | grep API      > echo $PATH

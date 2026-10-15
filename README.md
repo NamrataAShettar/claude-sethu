@@ -50,6 +50,10 @@ Add a second `>`: `>> git status` runs the same command but sends the output to 
   until you `--allow` that tool (or `--trust on` for everything).
 - **🪶 No package installs.** Pure Python standard library: no `pip`, no npm, no
   third-party packages to manage. (It just needs `python3`, see [Install](#-install).)
+- **🤫 Auto-quiet Claude's own noise (opt-in).** `sethu --autoquiet on` trims the
+  verbose output of commands **Claude** runs itself (dependency installs, builds)
+  before it enters the context, so those cost fewer tokens too, with the full output
+  kept on disk to re-read. Off by default; [more below](#-extras).
 
 > **sethu vs. `!` bang mode:** `!` is Claude Code's built-in shell shortcut, and it
 > always feeds output to Claude, so it always costs tokens. sethu's edge is the **free, out-of-context `>`**, plus a
@@ -124,6 +128,7 @@ subcommand styles both work (`sethu --mode shell` ≡ `sethu mode shell`).
 | `sethu --restart` | restart the persistent shell (clears shell-mode state) |
 | `sethu --timeout 60` | give commands up to 60s |
 | `sethu --runner` | show the current config (with defaults) |
+| `sethu --autoquiet on` | shrink Claude's **own** verbose build/install output before it costs tokens (opt-in, off by default) |
 
 Config lives in `~/.claude/sethu.json`. The full `sethu` menu has a few more knobs:
 `--prefix` (change the `>` trigger), `--color`, and `--maxlines`.
@@ -278,6 +283,28 @@ it.
 Storage stays bounded: the saved file is **reused per session** (one at a time),
 and sethu sweeps its own temp files (saved output, launch scripts, shell-mode
 sockets) once they're older than 7 days.
+</details>
+
+<details>
+<summary>auto-quiet: shrink Claude's own command output (opt-in)</summary>
+
+`sethu --autoquiet on` shrinks the output of verbose commands **Claude runs itself**
+(dependency installs and builds) before it enters Claude's context, so they cost fewer
+tokens, with no cooperation from Claude needed. It is **off by default**.
+
+- It only touches **successful** commands on the auto-quiet list (`sethu --autoquiet-add
+  "<cmd>"` adds one, e.g. `webpack`). A failed build keeps its full output, which is the
+  part you actually want. Inspection commands (`pip freeze`, `npm ls`, …) are never shrunk.
+- It keeps the last lines plus any error/warning lines, and leaves a `[sethu auto-quiet]`
+  note pointing at the captured output saved on disk, so Claude (or you) can read all of it
+  if needed.
+- `sethu --runner` shows whether it's on and what it shrinks; `--autoquiet-maxlines N`
+  tunes how much is kept (default 20).
+
+Prefer zero new machinery? A line in your `CLAUDE.md` such as *"pipe noisy installs/builds
+to `tail`, or pass a `--quiet` flag"* gets some of the same saving (and can cover failures
+too), but it relies on Claude remembering each time. auto-quiet is enforced and reaches
+subagents automatically.
 </details>
 
 <details>
