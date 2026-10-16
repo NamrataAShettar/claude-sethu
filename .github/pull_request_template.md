@@ -46,4 +46,5 @@ suite passes". -->
 - [ ] Security: does this change what auto-runs, or widen the gate / allowlist? If so, it's been audited.
 - [ ] `docs/use-cases.md` still accurate if gating / permissions changed
 - [ ] `CLAUDE.md` code-map updated if a function, section, or file moved
+- [ ] **New user-facing feature (`feat:`)?** README surfaces it where a new user discovers value (the intro / "Why sethu?" section, not only a cheat-sheet row or a collapsed block), and a screenshot is added where the repo uses them (or listed as a `manual` row in the test plan above)
 - [ ] Checked against `docs/design-guidelines.md`
