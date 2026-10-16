@@ -208,11 +208,34 @@ with one, either don't make it or update this doc deliberately.
   (a cap test — arriving with the ST1 fix). No wall-clock or size "baseline" needed —
   these are exact assertions.
 
+## Efficacy & premise (does it actually help?)
+
+A feature can be fully correct and still rarely matter — if the problem it solves does not
+occur at the assumed rate or magnitude. Validate the PREMISE, not just the mechanism.
+
+- **Measure the premise with REAL inputs, EARLY** — before committing to a design whose value
+  depends on a real-world input distribution. Run the actual target commands in the REAL
+  environment and measure. (auto-quiet, 2026-10-16, shipped assuming installs/builds are
+  verbose; a real `npm install` captured non-TTY — how Claude's Bash tool actually sees it — is
+  ~18 lines, because the hundreds-of-lines progress is a TTY animation that pipes suppress. One
+  `npm install | cat` up front would have caught it.)
+- **Test with REAL captured inputs, not synthetic fixtures.** Generators (`self._big()`,
+  `seq 300`) prove the MECHANISM and hide the PREMISE. Include at least one real-captured sample
+  when the behavior depends on real-world data shape.
+- **Distrust a verification that confirms the mechanism while dodging the premise.** A demo that
+  reached for an artificially favorable input (a synthetic verbose command to prove a shrinker)
+  is a smell, not a pass — the `seq 300` live probe "worked" and that is exactly why it misled.
+- **Separate "does it work" from "does it matter."** Correctness/bug reviews answer the first;
+  none will flag the second unless explicitly asked. Make efficacy its own review question.
+- **Read an efficacy miss correctly:** "defaults aimed at the wrong inputs" means RETARGET
+  (usually cheap), not abandon. Do not catastrophize a targeting problem into killing a feature.
+
 ---
 
 ## Checklist for any change
 
 - [ ] **Tested** — a test added/adjusted; coverage-table row updated; `TestCoverageEnforcement` green; full suite passes.
+- [ ] **Efficacy** — if the value depends on real input, the premise is validated with REAL captured inputs (not synthetic), the benefit measured, and the defaults target where it actually fires.
 - [ ] **UX** — opens with the `|^=^|` icon (so sethu is instantly recognizable), colorblind-safe & no new hue, truthful, actionable, plain language, no em-dashes.
 - [ ] **Correctness** — validates input, fails safe, doesn't rely on stale state.
 - [ ] **Use-cases** — every `docs/use-cases.md` example still behaves as documented (gated ones run, `--allow`/`--launch`/`--mode` ones work); doc updated in this change if permitted behavior changed.

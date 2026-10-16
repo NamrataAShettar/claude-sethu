@@ -47,4 +47,5 @@ suite passes". -->
 - [ ] `docs/use-cases.md` still accurate if gating / permissions changed
 - [ ] `CLAUDE.md` code-map updated if a function, section, or file moved
 - [ ] **New user-facing feature (`feat:`)?** README surfaces it where a new user discovers value (the intro / "Why sethu?" section, not only a cheat-sheet row or a collapsed block), and a screenshot is added where the repo uses them (or listed as a `manual` row in the test plan above)
+- [ ] **Value depends on real-world input?** Premise validated with REAL captured inputs (not synthetic `seq 300`-style fixtures), efficacy measured, and the defaults aim where it actually fires (see `docs/design-guidelines.md` "Efficacy & premise")
 - [ ] Checked against `docs/design-guidelines.md`
